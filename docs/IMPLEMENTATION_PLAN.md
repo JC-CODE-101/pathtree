@@ -209,6 +209,7 @@ To support different environments, we replace the POSIX wrapper with separate, m
 
 - **No Poetry Dependency**: These scripts invoke the globally/locally installed `pathtree` executable directly. They do not depend on Poetry or look for a local `pyproject.toml` file.
 - **Strict Separation**: Clean scripts are placed under `shell/` to change terminal sessions safely.
+- **Reliable Cleanup using Traps**: To avoid leaving behind orphaned files in the case of cancellations, shell exits, or signal interruptions (like `Ctrl+C` or termination signals), both adapters use robust shell-native `trap` command setups.
 
 ### Bash Adapter (`shell/pathtree.bash`)
 ```bash
@@ -218,6 +219,10 @@ To support different environments, we replace the POSIX wrapper with separate, m
 pb() {
     local temp_file
     temp_file=$(mktemp 2>/dev/null || mktemp -t 'pathtree')
+
+    # Register trap to clean up the temporary file on exit, cancellation, or interruption
+    # SIGHUP(1), SIGINT(2), SIGQUIT(3), SIGTERM(15), and EXIT(0)
+    trap 'rm -f "$temp_file"' EXIT INT TERM HUP
 
     # Invoke installed pathtree command directly
     pathtree --output "$temp_file" "$@"
@@ -232,8 +237,6 @@ pb() {
             echo "Error: Target path is not a valid directory: $target_path"
         fi
     fi
-
-    rm -f "$temp_file"
 }
 ```
 
@@ -245,6 +248,10 @@ pb() {
 pb() {
     local temp_file
     temp_file=$(mktemp 2>/dev/null || mktemp -t 'pathtree')
+
+    # Register trap to clean up the temporary file on exit, cancellation, or interruption
+    # SIGHUP(1), SIGINT(2), SIGQUIT(3), SIGTERM(15), and EXIT(0)
+    trap 'rm -f "$temp_file"' EXIT INT TERM HUP
 
     # Invoke installed pathtree command directly
     pathtree --output "$temp_file" "$@"
@@ -259,8 +266,6 @@ pb() {
             echo "Error: Target path is not a valid directory: $target_path"
         fi
     fi
-
-    rm -f "$temp_file"
 }
 ```
 
@@ -342,7 +347,7 @@ The development cycle of Milestone 0.0.1 is divided into five small, focused, re
 - **Objectives**: Setup basic files, layout, packaging configs, and linter settings.
 - **Deliverables**:
   - `pyproject.toml` using standard declarative setup configuration.
-  - Basic `src/pathtree/app.py` utilizing `argparse` to handle arguments (like `--output` and `--seed-dev`).
+  - Basic `src/pathtree/app.py` utilizing standard `argparse` to handle only the basic `--output <file-path>` CLI argument (excluding `--seed-dev` at this stage).
 - **Testing**: Verify tests run with 0 tests.
 
 ### PR 2: Persistent Storage Layer & Schema
@@ -356,10 +361,10 @@ The development cycle of Milestone 0.0.1 is divided into five small, focused, re
   - Test of SQLite `user_version` database setup.
 
 ### PR 3: Service Layer & Dev Seeding
-- **Objectives**: Build core business logic and command utilities.
+- **Objectives**: Build core business logic, node cycle validation, and seeding utility.
 - **Deliverables**:
   - `services/node_service.py` to organize tree collections and prevent cycles.
-  - Implement the `--seed-dev` command parsing inside `app.py`. Seed data is never populated on standard startup.
+  - Implement actual database seeding code, and introduce the `--seed-dev` command option inside `app.py` here alongside its actual service implementation. Dev seed data is strictly isolated to this option and is never populated on standard startup.
 - **Testing**: Test suite asserting node validation constraints and service functions.
 
 ### PR 4: Textual UI & Keybindings
@@ -371,8 +376,8 @@ The development cycle of Milestone 0.0.1 is divided into five small, focused, re
 - **Testing**: Textual async UI test cases mimicking focus and node selection, verifying details panel state.
 
 ### PR 5: Shell Adapters & CLI Integration
-- **Objectives**: Deliver integration wrappers for Bash and Zsh.
+- **Objectives**: Deliver robust, cleanup-safe integration wrappers for Bash and Zsh.
 - **Deliverables**:
-  - `shell/pathtree.bash` and `shell/pathtree.zsh`.
+  - `shell/pathtree.bash` and `shell/pathtree.zsh` featuring shell-appropriate `trap` cleanups for all cancellation, signal disruption, and normal exit states.
   - Integration mapping to serialize target paths to file paths specified by the `--output` CLI argument.
 - **Testing**: Integration checks testing the wrapper script behaviors with mock temporary files.
