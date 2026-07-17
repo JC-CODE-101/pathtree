@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pathtree"
-version = "0.1.0"
-description = "A modern terminal workspace and path manager with tree navigation, bookmarks, temporary sessions and shell integration."
+version = "0.0.1"
+description = "A keyboard-first terminal path manager with tree navigation and shell integration."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
