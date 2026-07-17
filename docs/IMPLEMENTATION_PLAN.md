@@ -83,7 +83,7 @@ We minimize third-party dependencies to ensure long-term maintainability:
 3. **pytest & pytest-asyncio**
    - *Why*: Unit testing suite with async testing capabilities for Textual widgets.
 4. **ruff**
-   - *Why*: Code linting and formatting.
+   - *Why*: Code linter and formatting.
 5. **argparse (Standard Library)**
    - *Why*: Preferred over `Click` to avoid unnecessary dependencies and keep the CLI clean and standard.
 
@@ -209,9 +209,13 @@ To support different environments, we replace the POSIX wrapper with separate, m
 
 - **No Poetry Dependency**: These scripts invoke the globally/locally installed `pathtree` executable directly. They do not depend on Poetry or look for a local `pyproject.toml` file.
 - **Strict Separation**: Clean scripts are placed under `shell/` to change terminal sessions safely.
-- **Reliable Cleanup using Traps**: To avoid leaving behind orphaned files in the case of cancellations, shell exits, or signal interruptions (like `Ctrl+C` or termination signals), both adapters use robust shell-native `trap` command setups.
+- **Transient, Non-Persistent Cleanup**: Sourced functions must never leave persistent traps (such as persistent `EXIT` traps) active in the active shell shell session after returning, nor overwrite or corrupt any existing user traps.
 
 ### Bash Adapter (`shell/pathtree.bash`)
+Uses a transient, self-restoring signal trap pattern. Original user traps are recorded, temporarily reassigned for signals `INT`, `TERM`, and `HUP`, and then restored to their exact original states prior to function exit. This guarantees correct cleanup on interruption without modifying the user's long-term shell environment.
+
+If no custom trap was previously registered for a signal, we explicitly restore the handler to the system default using `trap - <SIGNAL>` rather than evaluating an empty string (which would leave our temporary shell trap registered globally in the active interactive session).
+
 ```bash
 # PathTree Bash Integration
 # To use, add 'source /path/to/pathtree.bash' to your ~/.bashrc
@@ -220,14 +224,39 @@ pb() {
     local temp_file
     temp_file=$(mktemp 2>/dev/null || mktemp -t 'pathtree')
 
-    # Register trap to clean up the temporary file on exit, cancellation, or interruption
-    # SIGHUP(1), SIGINT(2), SIGQUIT(3), SIGTERM(15), and EXIT(0)
-    trap 'rm -f "$temp_file"' EXIT INT TERM HUP
+    # Save existing trap handlers for clean restoration
+    local saved_int_trap
+    saved_int_trap=$(trap -p INT)
+    local saved_term_trap
+    saved_term_trap=$(trap -p TERM)
+    local saved_hup_trap
+    saved_hup_trap=$(trap -p HUP)
+
+    # Define a clean-up handler for interruptions
+    _pb_cleanup() {
+        rm -f "$temp_file"
+
+        # Restore saved traps, resetting to defaults if no previous trap existed
+        if [ -n "$saved_int_trap" ]; then eval "$saved_int_trap"; else trap - INT; fi
+        if [ -n "$saved_term_trap" ]; then eval "$saved_term_trap"; else trap - TERM; fi
+        if [ -n "$saved_hup_trap" ]; then eval "$saved_hup_trap"; else trap - HUP; fi
+    }
+
+    # Set temporary traps for interruptions
+    trap '_pb_cleanup; kill -INT $$' INT
+    trap '_pb_cleanup; kill -TERM $$' TERM
+    trap '_pb_cleanup; kill -HUP $$' HUP
 
     # Invoke installed pathtree command directly
     pathtree --output "$temp_file" "$@"
     local exit_status=$?
 
+    # Restore user traps immediately
+    if [ -n "$saved_int_trap" ]; then eval "$saved_int_trap"; else trap - INT; fi
+    if [ -n "$saved_term_trap" ]; then eval "$saved_term_trap"; else trap - TERM; fi
+    if [ -n "$saved_hup_trap" ]; then eval "$saved_hup_trap"; else trap - HUP; fi
+
+    # Process target selection and perform cleanup on normal exit
     if [ $exit_status -eq 0 ] && [ -s "$temp_file" ]; then
         local target_path
         target_path=$(cat "$temp_file")
@@ -237,10 +266,14 @@ pb() {
             echo "Error: Target path is not a valid directory: $target_path"
         fi
     fi
+
+    rm -f "$temp_file"
 }
 ```
 
 ### Zsh Adapter (`shell/pathtree.zsh`)
+Uses Zsh's highly robust, native `{ try-block } always { always-block }` block structure. This structure guarantees execution of the cleanup block under all circumstances (normal returns, signal interrupts, or errors) cleanly and idiomatically, entirely bypassing the need to read or alter the user's active trap states.
+
 ```zsh
 # PathTree Zsh Integration
 # To use, add 'source /path/to/pathtree.zsh' to your ~/.zshrc
@@ -249,23 +282,24 @@ pb() {
     local temp_file
     temp_file=$(mktemp 2>/dev/null || mktemp -t 'pathtree')
 
-    # Register trap to clean up the temporary file on exit, cancellation, or interruption
-    # SIGHUP(1), SIGINT(2), SIGQUIT(3), SIGTERM(15), and EXIT(0)
-    trap 'rm -f "$temp_file"' EXIT INT TERM HUP
+    {
+        # Run pathtree within the protected try block
+        pathtree --output "$temp_file" "$@"
+        local exit_status=$?
 
-    # Invoke installed pathtree command directly
-    pathtree --output "$temp_file" "$@"
-    local exit_status=$?
-
-    if [ $exit_status -eq 0 ] && [ -s "$temp_file" ]; then
-        local target_path
-        target_path=$(cat "$temp_file")
-        if [ -d "$target_path" ]; then
-            cd "$target_path"
-        else
-            echo "Error: Target path is not a valid directory: $target_path"
+        if [ $exit_status -eq 0 ] && [ -s "$temp_file" ]; then
+            local target_path
+            target_path=$(cat "$temp_file")
+            if [ -d "$target_path" ]; then
+                cd "$target_path"
+            else
+                echo "Error: Target path is not a valid directory: $target_path"
+            fi
         fi
-    fi
+    } always {
+        # The always block is guaranteed to execute, even on interruptions or cancellations
+        rm -f "$temp_file"
+    }
 }
 ```
 
@@ -378,6 +412,7 @@ The development cycle of Milestone 0.0.1 is divided into five small, focused, re
 ### PR 5: Shell Adapters & CLI Integration
 - **Objectives**: Deliver robust, cleanup-safe integration wrappers for Bash and Zsh.
 - **Deliverables**:
-  - `shell/pathtree.bash` and `shell/pathtree.zsh` featuring shell-appropriate `trap` cleanups for all cancellation, signal disruption, and normal exit states.
+  - `shell/pathtree.bash` using transient, self-restoring traps for interruptions (`INT`, `TERM`, `HUP`), completely avoiding persistent `EXIT` traps and restoring user signal actions cleanly on return. If no trap handler was previously configured, it resets them to default via `trap - <SIGNAL>` to prevent leaking temporary TUI signal handlers to the active terminal.
+  - `shell/pathtree.zsh` utilizing native `{ try-block } always { always-block }` handling to clean up the temporary file safely without altering or affecting active shell traps.
   - Integration mapping to serialize target paths to file paths specified by the `--output` CLI argument.
-- **Testing**: Integration checks testing the wrapper script behaviors with mock temporary files.
+- **Testing**: Integration checks testing that both adapters cleanly handle exit, interruption, and cancellation states, and leave the parent shell's trap configuration exactly unchanged.
