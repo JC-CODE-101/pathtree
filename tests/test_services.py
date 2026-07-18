@@ -759,3 +759,118 @@ def test_search_scenarios(node_service: NodeService) -> None:
 
     # 8. Empty query
     assert len(node_service.search_nodes(query="")) == 2
+
+
+def test_update_node_mutation_safety_regression(
+    node_service: NodeService, session: Session
+) -> None:
+    """Regression test: failed updates must not leave dirty in-memory modifications."""
+    from pathtree.services.node_service import ValidationError
+
+    # 1. Create a permanent structural node
+    ws = node_service.create_node(name="Safe WS", node_kind="workspace")
+    assert ws.is_favorite is False
+    assert ws.path is None
+
+    # 2. Attempt an update with early valid change (is_favorite=True)
+    # and later invalid change (path="/etc")
+    with pytest.raises(ValidationError):
+        node_service.update_node(ws.id, is_favorite=True, path="/etc")
+
+    # 3. Perform another successful operation that commits
+    dummy_f = node_service.create_node(name="Other Folder", node_kind="folder")
+    node_service.update_node(dummy_f.id, description="Committed change")
+
+    # 4. Reload original node using a fresh session to check state
+    session.expire_all()
+    reloaded_ws = node_service.get_node(ws.id)
+    assert reloaded_ws.is_favorite is False
+    assert reloaded_ws.path is None
+
+
+def test_update_node_mutation_safety_name_failure(
+    node_service: NodeService, session: Session
+) -> None:
+    """Regression test: name failure leaves name unchanged in database and session."""
+    from pathtree.services.node_service import EmptyNodeNameError
+
+    ws = node_service.create_node(name="Safe Name", node_kind="workspace")
+
+    with pytest.raises(EmptyNodeNameError):
+        node_service.update_node(ws.id, icon="🚀", name="   ")
+
+    # Confirm icon change was not applied/persisted
+    session.expire_all()
+    reloaded = node_service.get_node(ws.id)
+    assert reloaded.name == "Safe Name"
+    assert reloaded.icon is None
+
+
+def test_update_node_mutation_safety_unsupported_fields(
+    node_service: NodeService, session: Session
+) -> None:
+    """Test that unsupported fields are rejected and leave node unchanged."""
+    from pathtree.services.node_service import ValidationError
+
+    ws = node_service.create_node(name="My Workspace", node_kind="workspace")
+
+    with pytest.raises(ValidationError, match="Unsupported field"):
+        node_service.update_node(ws.id, is_favorite=True, unknown_field="invalid")
+
+    session.expire_all()
+    reloaded = node_service.get_node(ws.id)
+    assert reloaded.is_favorite is False
+
+
+def test_parent_kind_allowlist_create_and_move_rejections(
+    node_service: NodeService, session: Session
+) -> None:
+    """Test parent allowlist rejects invalid parent kinds and leaves DB unchanged."""
+    # Force an unsupported parent kind into database, bypassing validations
+    from pathtree.database.repository import NodeRepository
+    from pathtree.models.node import Node
+    from pathtree.services.node_service import InvalidParentKindError
+
+    repo = NodeRepository(session)
+    malformed_parent = repo.create(
+        Node(name="Malformed Parent", node_kind="invalid_kind")
+    )
+
+    # create_node below malformed parent must be rejected
+    with pytest.raises(InvalidParentKindError):
+        node_service.create_node(
+            name="Child Node", node_kind="workspace", parent_id=malformed_parent.id
+        )
+
+    # move_node below malformed parent must be rejected
+    folder = node_service.create_node(name="Valid Folder", node_kind="folder")
+    orig_parent_id = folder.parent_id
+
+    with pytest.raises(InvalidParentKindError):
+        node_service.move_node(folder.id, malformed_parent.id)
+
+    # Reload folder to verify parent is unchanged
+    session.expire_all()
+    reloaded_folder = node_service.get_node(folder.id)
+    assert reloaded_folder.parent_id == orig_parent_id
+
+
+def test_get_descendants_cycle_protection(
+    node_service: NodeService, session: Session
+) -> None:
+    """Test that cyclic parent-child chains raise RepositoryCycleError / CycleError."""
+    from pathtree.database.repository import NodeRepository
+    from pathtree.models.node import Node
+    from pathtree.services.node_service import CycleError
+
+    repo = NodeRepository(session)
+    n1 = repo.create(Node(name="Node1", node_kind="folder"))
+    n2 = repo.create(Node(name="Node2", node_kind="folder", parent_id=n1.id))
+
+    # Force a cycle: n1's parent is n2
+    n1.parent_id = n2.id
+    repo.update(n1)
+
+    # Calling count_descendants must detect the cycle and raise CycleError
+    with pytest.raises(CycleError, match="Cycle detected"):
+        node_service.count_descendants(n1.id)

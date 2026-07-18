@@ -6,6 +6,10 @@ from sqlmodel import Session, select
 from pathtree.models.node import Node
 
 
+class RepositoryCycleError(Exception):
+    """Raised when a parent-child cycle is detected in the database."""
+
+
 class NodeRepository:
     """Repository for managing Node persistence.
 
@@ -104,11 +108,18 @@ class NodeRepository:
         """Fetch all descendants of node_id recursively."""
         descendants = []
         queue = [node_id]
+        visited = {node_id}
         while queue:
             curr_id = queue.pop(0)
             statement = select(Node).where(Node.parent_id == curr_id)
             children = self.session.exec(statement).all()
             for child in children:
+                if child.id in visited:
+                    raise RepositoryCycleError(
+                        f"Cycle detected in parent hierarchy: "
+                        f"{child.id} is already visited."
+                    )
+                visited.add(child.id)
                 descendants.append(child)
                 queue.append(child.id)
         return descendants
@@ -129,9 +140,9 @@ class NodeRepository:
                 self.session.flush()
             self.session.commit()
             return len(descendants)
-        except Exception as e:
+        except Exception:
             self.session.rollback()
-            raise e
+            raise
 
     def has_sibling_with_name(
         self,

@@ -183,10 +183,11 @@ class NodeService:
         if parent_node is None:
             raise ParentNotFoundError(f"Parent node {parent_id} does not exist.")
 
-        # 3. Rejects parent nodes that are resources
-        if parent_node.node_kind == "resource":
+        # 3. Rejects parent nodes that are not in {"workspace", "folder"}
+        if parent_node.node_kind not in {"workspace", "folder"}:
             raise InvalidParentKindError(
-                f"Parent node {parent_id} cannot be of kind 'resource'."
+                f"Parent node {parent_id} kind "
+                f"'{parent_node.node_kind}' is not allowed."
             )
 
         if node_id is not None:
@@ -377,18 +378,34 @@ class NodeService:
                 "To change parent, use move_node instead of update_node."
             )
 
-        # Check node_kind and resource_type change rejections
-        if "node_kind" in kwargs and kwargs["node_kind"] != node.node_kind:
-            raise ValidationError("Converting between node kinds is not allowed.")
-        if "resource_type" in kwargs and kwargs["resource_type"] != node.resource_type:
-            raise ValidationError("Changing resource type is not allowed.")
+        allowed_fields = {
+            "name",
+            "description",
+            "icon",
+            "path",
+            "sort_order",
+            "is_favorite",
+            "is_temporary",
+        }
+        for kw in kwargs:
+            if kw not in allowed_fields:
+                raise ValidationError(f"Unsupported field for update: {kw}")
+
+        # Local variables to hold proposed state
+        proposed_name = node.name
+        proposed_description = node.description
+        proposed_icon = node.icon
+        proposed_path = node.path
+        proposed_sort_order = node.sort_order
+        proposed_is_favorite = node.is_favorite
+        proposed_is_temporary = node.is_temporary
 
         # Check temporary to permanent demotion rules
         if "is_temporary" in kwargs:
             val = kwargs["is_temporary"]
             if val is True and not node.is_temporary:
                 raise ValidationError("Permanent nodes cannot be demoted to temporary.")
-            node.is_temporary = val
+            proposed_is_temporary = val
 
         # Handle name change
         if "name" in kwargs:
@@ -404,7 +421,7 @@ class NodeService:
                 raise DuplicateSiblingNameError(
                     f"A sibling node with the name '{trimmed_name}' already exists."
                 )
-            node.name = trimmed_name
+            proposed_name = trimmed_name
 
         # Handle path change
         if "path" in kwargs:
@@ -422,22 +439,47 @@ class NodeService:
                 and normalized_path is not None
             ):
                 raise ValidationError("Structural nodes must not contain a path.")
-            node.path = normalized_path
+            proposed_path = normalized_path
 
         # Handle description, icon, sort_order, is_favorite
         if "description" in kwargs:
-            node.description = kwargs["description"]
+            proposed_description = kwargs["description"]
         if "icon" in kwargs:
-            node.icon = kwargs["icon"]
+            proposed_icon = kwargs["icon"]
         if "sort_order" in kwargs:
-            node.sort_order = kwargs["sort_order"]
+            proposed_sort_order = kwargs["sort_order"]
         if "is_favorite" in kwargs:
-            node.is_favorite = kwargs["is_favorite"]
+            proposed_is_favorite = kwargs["is_favorite"]
 
-        # Final checks
-        self.validate_node(node)
-        if node.node_kind in ("workspace", "folder") and node.path is not None:
+        # Final checks on a temporary / dummy Node
+        dummy_node = Node(
+            id=node.id,
+            parent_id=node.parent_id,
+            name=proposed_name,
+            node_kind=node.node_kind,
+            resource_type=node.resource_type,
+            path=proposed_path,
+            description=proposed_description,
+            icon=proposed_icon,
+            sort_order=proposed_sort_order,
+            is_favorite=proposed_is_favorite,
+            is_temporary=proposed_is_temporary,
+        )
+        self.validate_node(dummy_node)
+        if (
+            dummy_node.node_kind in ("workspace", "folder")
+            and dummy_node.path is not None
+        ):
             raise ValidationError("Structural nodes must not contain a path.")
+
+        # Mutate the actual managed node only after all validations have succeeded
+        node.name = proposed_name
+        node.description = proposed_description
+        node.icon = proposed_icon
+        node.path = proposed_path
+        node.sort_order = proposed_sort_order
+        node.is_favorite = proposed_is_favorite
+        node.is_temporary = proposed_is_temporary
 
         return self.repository.update(node)
 
@@ -479,7 +521,12 @@ class NodeService:
         node = self.repository.get_by_id(node_id)
         if node is None:
             raise NodeNotFoundError(f"Node {node_id} does not exist.")
-        return len(self.repository.get_descendants(node_id))
+        from pathtree.database.repository import RepositoryCycleError
+
+        try:
+            return len(self.repository.get_descendants(node_id))
+        except RepositoryCycleError as e:
+            raise CycleError(str(e)) from e
 
     def delete_node(self, node_id: uuid.UUID, recursive: bool = True) -> bool:
         """Delete a node and its descendants if recursive=True.
@@ -491,15 +538,20 @@ class NodeService:
         if node is None:
             raise NodeNotFoundError(f"Node {node_id} does not exist.")
 
-        if not recursive:
-            descendants = self.repository.get_descendants(node_id)
-            if descendants:
-                raise ValidationError(
-                    f"Node {node_id} has descendants and "
-                    "cannot be deleted non-recursively."
-                )
+        from pathtree.database.repository import RepositoryCycleError
 
-        self.repository.delete_recursive(node_id)
+        try:
+            if not recursive:
+                descendants = self.repository.get_descendants(node_id)
+                if descendants:
+                    raise ValidationError(
+                        f"Node {node_id} has descendants and "
+                        "cannot be deleted non-recursively."
+                    )
+
+            self.repository.delete_recursive(node_id)
+        except RepositoryCycleError as e:
+            raise CycleError(str(e)) from e
         return True
 
     def search_nodes(
