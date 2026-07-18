@@ -42,7 +42,7 @@ def test_sqlite_pragmas(engine):
 
 
 def test_user_version():
-    """Test user_version is correctly queried and set to 1."""
+    """Test user_version is correctly queried and set to 2."""
     # Use a temp file to ensure clean initialization behavior
     fd, temp_path_str = tempfile.mkstemp()
     os.close(fd)
@@ -56,7 +56,7 @@ def test_user_version():
         with Session(engine) as session:
             connection = session.connection()
             version = connection.execute(text("PRAGMA user_version;")).scalar()
-            assert version == 1
+            assert version == 2
 
             # Check that table exists
             cursor = connection.execute(
@@ -67,12 +67,12 @@ def test_user_version():
             )
             assert cursor.first() is not None
 
-        # Re-run init_db and ensure version is still 1
+        # Re-run init_db and ensure version is still 2
         init_db(engine)
         with Session(engine) as session:
             connection = session.connection()
             version = connection.execute(text("PRAGMA user_version;")).scalar()
-            assert version == 1
+            assert version == 2
 
     finally:
         if temp_path.exists():
@@ -93,12 +93,13 @@ def test_user_version():
 
 
 def test_node_create(session):
-    """Test creating a Node and optional local path attribute."""
+    """Test creating a Node with node_kind and resource_type."""
     repo = NodeRepository(session)
 
     node = Node(
-        name="My Workspace",
-        node_type="Workspace",
+        name="My Directory",
+        node_kind="resource",
+        resource_type="directory",
         description="Core developer projects",
         icon="📁",
         path="/home/user/projects",
@@ -109,8 +110,9 @@ def test_node_create(session):
 
     assert created.id is not None
     assert isinstance(created.id, uuid.UUID)
-    assert created.name == "My Workspace"
-    assert created.node_type == "Workspace"
+    assert created.name == "My Directory"
+    assert created.node_kind == "resource"
+    assert created.resource_type == "directory"
     assert created.description == "Core developer projects"
     assert created.icon == "📁"
     assert created.path == "/home/user/projects"
@@ -124,13 +126,27 @@ def test_node_read(session):
     repo = NodeRepository(session)
 
     # Create root
-    root = repo.create(Node(name="Root", node_type="Workspace", sort_order=1))
+    root = repo.create(
+        Node(name="Root", node_kind="workspace", resource_type=None, sort_order=1)
+    )
     # Create children
     child1 = repo.create(
-        Node(name="Child 1", node_type="Folder", parent_id=root.id, sort_order=2)
+        Node(
+            name="Child 1",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=root.id,
+            sort_order=2,
+        )
     )
     child2 = repo.create(
-        Node(name="Child 2", node_type="Folder", parent_id=root.id, sort_order=1)
+        Node(
+            name="Child 2",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=root.id,
+            sort_order=1,
+        )
     )
 
     # Test get_by_id
@@ -167,7 +183,14 @@ def test_node_update(session):
     """Test updating an existing Node."""
     repo = NodeRepository(session)
 
-    node = repo.create(Node(name="Old Name", node_type="Folder", path="/original"))
+    node = repo.create(
+        Node(
+            name="Old Name",
+            node_kind="resource",
+            resource_type="directory",
+            path="/original",
+        )
+    )
 
     # Update attributes
     node.name = "New Name"
@@ -188,7 +211,7 @@ def test_node_delete(session):
     """Test deleting a Node."""
     repo = NodeRepository(session)
 
-    node = repo.create(Node(name="To Delete", node_type="Folder"))
+    node = repo.create(Node(name="To Delete", node_kind="folder", resource_type=None))
     node_id = node.id
 
     # Verify exists
@@ -244,7 +267,7 @@ def test_updated_at_increases_on_update(session):
 
     repo = NodeRepository(session)
 
-    node = repo.create(Node(name="Test Node", node_type="Folder"))
+    node = repo.create(Node(name="Test Node", node_kind="folder", resource_type=None))
     original_updated_at = node.updated_at
 
     # Wait briefly to ensure a timestamp difference

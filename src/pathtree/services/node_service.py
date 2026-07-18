@@ -14,6 +14,10 @@ class SelfParentError(NodeServiceError):
     """Raised when a node is set as its own parent."""
 
 
+class ValidationError(NodeServiceError):
+    """Raised when node model validation fails."""
+
+
 class CycleError(NodeServiceError):
     """Raised when a cycle/descendant loop is detected."""
 
@@ -233,3 +237,30 @@ class NodeService:
         """
         flat_nodes = self.repository.list_all()
         return self.build_tree(flat_nodes)
+
+    def validate_node(self, node: Node) -> None:
+        """Validate node kind and resource type combination.
+
+        Only specific combinations of node_kind and resource_type are valid:
+        - node_kind = "workspace" and resource_type = None
+        - node_kind = "folder" and resource_type = None
+        - node_kind = "resource" and resource_type = "directory"
+
+        Raises:
+            ValidationError: If any other combination is provided.
+        """
+        kind = node.node_kind
+        res_type = node.resource_type
+
+        valid = False
+        if kind == "workspace" and res_type is None:
+            valid = True
+        elif kind == "folder" and res_type is None:
+            valid = True
+        elif kind == "resource" and res_type == "directory":
+            valid = True
+
+        if not valid:
+            raise ValidationError(
+                f"Invalid combination: node_kind='{kind}', resource_type='{res_type}'."
+            )

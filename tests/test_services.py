@@ -41,15 +41,31 @@ def test_root_and_child_loading(node_service: NodeService, session: Session) -> 
     repo = node_service.repository
 
     # Create root nodes
-    root1 = repo.create(Node(name="Root 1", node_type="Workspace", sort_order=2))
-    root2 = repo.create(Node(name="Root 2", node_type="Workspace", sort_order=1))
+    root1 = repo.create(
+        Node(name="Root 1", node_kind="workspace", resource_type=None, sort_order=2)
+    )
+    root2 = repo.create(
+        Node(name="Root 2", node_kind="workspace", resource_type=None, sort_order=1)
+    )
 
     # Create children for root 2
     child1 = repo.create(
-        Node(name="Child 1", node_type="Folder", parent_id=root2.id, sort_order=2)
+        Node(
+            name="Child 1",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=root2.id,
+            sort_order=2,
+        )
     )
     child2 = repo.create(
-        Node(name="Child 2", node_type="Folder", parent_id=root2.id, sort_order=1)
+        Node(
+            name="Child 2",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=root2.id,
+            sort_order=1,
+        )
     )
 
     # Test load_root_nodes (sorted by sort_order, then created_at)
@@ -75,15 +91,35 @@ def test_deterministic_nested_tree_construction(
     repo = node_service.repository
 
     # Set up nodes with deterministic order
-    root = repo.create(Node(name="Root", node_type="Workspace", sort_order=1))
+    root = repo.create(
+        Node(name="Root", node_kind="workspace", resource_type=None, sort_order=1)
+    )
     child_b = repo.create(
-        Node(name="B", node_type="Folder", parent_id=root.id, sort_order=2)
+        Node(
+            name="B",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=root.id,
+            sort_order=2,
+        )
     )
     child_a = repo.create(
-        Node(name="A", node_type="Folder", parent_id=root.id, sort_order=1)
+        Node(
+            name="A",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=root.id,
+            sort_order=1,
+        )
     )
     grandchild = repo.create(
-        Node(name="Sub", node_type="Folder", parent_id=child_a.id, sort_order=1)
+        Node(
+            name="Sub",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=child_a.id,
+            sort_order=1,
+        )
     )
 
     # Fetch flat list and build tree
@@ -119,10 +155,22 @@ def test_descendant_cycle_rejection(
     repo = node_service.repository
 
     # root -> child -> grandchild
-    root = repo.create(Node(name="Root", node_type="Folder"))
-    child = repo.create(Node(name="Child", node_type="Folder", parent_id=root.id))
+    root = repo.create(Node(name="Root", node_kind="folder", resource_type=None))
+    child = repo.create(
+        Node(
+            name="Child",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=root.id,
+        )
+    )
     grandchild = repo.create(
-        Node(name="Grandchild", node_type="Folder", parent_id=child.id)
+        Node(
+            name="Grandchild",
+            node_kind="folder",
+            resource_type=None,
+            parent_id=child.id,
+        )
     )
 
     # Validate setting grandchild as parent of root
@@ -145,8 +193,12 @@ def test_protection_against_malformed_cyclic_database_data(
     repo = node_service.repository
 
     # Create nodes with parent_id=None initially to satisfy FK checks, then update them
-    node_a = repo.create(Node(name="A", parent_id=None))
-    node_b = repo.create(Node(name="B", parent_id=None))
+    node_a = repo.create(
+        Node(name="A", node_kind="folder", resource_type=None, parent_id=None)
+    )
+    node_b = repo.create(
+        Node(name="B", node_kind="folder", resource_type=None, parent_id=None)
+    )
 
     node_a.parent_id = node_b.id
     node_b.parent_id = node_a.id
@@ -175,7 +227,12 @@ def test_valid_directory_path_resolution(
     with tempfile.TemporaryDirectory() as tmp_dir:
         resolved_tmp = Path(tmp_dir).resolve()
         node = repo.create(
-            Node(name="Temp Dir", node_type="Folder", path=str(resolved_tmp))
+            Node(
+                name="Temp Dir",
+                node_kind="resource",
+                resource_type="directory",
+                path=str(resolved_tmp),
+            )
         )
 
         resolved_path = node_service.resolve_node_path(node.id)
@@ -185,7 +242,14 @@ def test_valid_directory_path_resolution(
 def test_missing_path(node_service: NodeService, session: Session) -> None:
     """Test that an error is raised when the node has no path."""
     repo = node_service.repository
-    node = repo.create(Node(name="No Path Node", node_type="Folder", path=None))
+    node = repo.create(
+        Node(
+            name="No Path Node",
+            node_kind="resource",
+            resource_type="directory",
+            path=None,
+        )
+    )
 
     with pytest.raises(NoPathError):
         node_service.resolve_node_path(node.id)
@@ -196,7 +260,12 @@ def test_nonexistent_path(node_service: NodeService, session: Session) -> None:
     repo = node_service.repository
     nonexistent_p = "/nonexistent/path/for/pathtree/test"
     node = repo.create(
-        Node(name="Bad Path Node", node_type="Folder", path=nonexistent_p)
+        Node(
+            name="Bad Path Node",
+            node_kind="resource",
+            resource_type="directory",
+            path=nonexistent_p,
+        )
     )
 
     with pytest.raises(PathNotFoundError):
@@ -209,7 +278,12 @@ def test_path_pointing_to_file(node_service: NodeService, session: Session) -> N
 
     with tempfile.NamedTemporaryFile() as tmp_file:
         node = repo.create(
-            Node(name="File Path Node", node_type="Folder", path=tmp_file.name)
+            Node(
+                name="File Path Node",
+                node_kind="resource",
+                resource_type="directory",
+                path=tmp_file.name,
+            )
         )
 
         with pytest.raises(PathNotADirectoryError):
