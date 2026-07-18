@@ -213,3 +213,14 @@ class NodeService:
             )
 
         return path
+
+    def get_node(self, node_id: uuid.UUID) -> Node | None:
+        """Retrieve a node by its ID through the service.
+
+        Args:
+            node_id: The UUID of the node to retrieve.
+
+        Returns:
+            The Node object if found, otherwise None.
+        """
+        return self.repository.get_by_id(node_id)
