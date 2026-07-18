@@ -1,193 +1,49 @@
 # PathTree Shell Integration
 
-Version: 0.1 (Draft)
+This document describes how PathTree integrates with supported terminal shell sessions to perform automatic directory navigation (`cd`).
 
 ---
 
-# Overview
+## Architecture & Responsibilities
 
-PathTree integrates with the user's shell through a lightweight shell adapter.
+The shell integration relies on a lightweight shell adapter mechanism.
 
-The shell adapter is responsible only for communication between the shell and the Python application.
-
-Business logic always remains inside the Python application.
-
----
-
-# Design Goals
-
-The shell integration should be:
-
-- lightweight
-- shell independent
-- easy to maintain
-- easy to extend
-
-The adapter should contain as little logic as possible.
+1. **Python Application**: Responsible for user interfaces, node/tree navigation, and database management. It never calls `os.chdir()` or executes terminal change-directory actions directly. Instead, when a directory is selected, the application writes the absolute path to a temporary file specified by the `--output` CLI flag and terminates with exit code 0.
+2. **Shell Adapter**: Responsible for running PathTree, reading the temporary file contents safely (without execution or evaluation), verifying that the target exists and is a directory, changing the current working directory, and ensuring clean, transient removal of the temporary file.
 
 ---
 
-# Responsibilities
+## Installation & Setup
 
-The shell adapter is responsible for:
+To enable directory-changing functionality via PathTree, you must **source** the appropriate shell adapter rather than executing it.
 
-- launching PathTree
-- receiving the selected result
-- changing the current directory
-- returning control to the shell
+### Bash Setup
 
-Nothing else.
-
----
-
-# Python Responsibilities
-
-The Python application is responsible for:
-
-- loading the database
-- displaying the user interface
-- tree navigation
-- searching
-- selecting nodes
-- selecting actions
-- validating user input
-
-Python never changes the shell directory directly.
-
----
-
-# Shell Responsibilities
-
-The shell is responsible for:
-
-- executing cd
-- executing shell-specific commands
-- maintaining the current shell session
-
----
-
-# Communication Flow
-
-```
-User
-
-↓
-
-pb
-
-↓
-
-Shell Adapter
-
-↓
-
-Python Application
-
-↓
-
-Selected Path
-
-↓
-
-Shell Adapter
-
-↓
-
-cd
-
-↓
-
-User continues working
-```
-
----
-
-# Directory Changes
-
-The Python application never executes:
+Add the following line to your `~/.bashrc`:
 
 ```bash
-cd
+source /path/to/pathtree/shell/pathtree.bash
 ```
 
-Instead, it returns the selected directory to the shell adapter.
+### Zsh Setup
 
-The adapter performs the directory change.
+Add the following line to your `~/.zshrc`:
 
----
+```zsh
+source /path/to/pathtree/shell/pathtree.zsh
+```
 
-# Supported Shells
-
-The architecture is designed to support:
-
-- Bash
-- Zsh
-
-Future support may include:
-
-- Fish
-- PowerShell
-
-Support for additional shells should only require writing a new adapter.
-
-The Python application should remain unchanged.
+*(Replace `/path/to/pathtree` with the actual path to your PathTree installation directory).*
 
 ---
 
-# Adapter Design
+## Usage: The `pb` Command
 
-Shell adapters should remain extremely small.
+Once sourced, the integration provides the `pb` shell function:
 
-Typical responsibilities include:
-
-- launching PathTree
-- reading the selected path
-- changing directories
-
-Business rules must never be duplicated inside adapters.
-
----
-
-# Error Handling
-
-If PathTree exits without selecting a path:
-
-- the current directory remains unchanged
-
-If the selected path does not exist:
-
-- display an error
-- remain in the current directory
-
-The shell adapter should never terminate the user's shell session.
-
----
-
-# Future Extensions
-
-Future shell integration may support:
-
-- aliases
-- shell completion
-- shell history integration
-- startup hooks
-
-These features are intentionally postponed.
-
----
-
-# Design Rules
-
-The Python application must remain independent from any shell.
-
-Every shell-specific implementation belongs inside an adapter.
-
-No business logic should exist inside shell scripts.
-
----
-
-# Summary
-
-The shell adapter acts only as a bridge between the shell and the Python application.
-
-Keeping the adapter minimal makes PathTree portable, maintainable, and easy to extend to additional shells.
+- **Command**: `pb [arguments]`
+- **Action**: Launches PathTree, allowing keyboard-first tree navigation. Upon pressing `Enter` on a selected folder, the active terminal session automatically changes its directory to the target path.
+- **Safety**:
+  - If you cancel or quit PathTree (`q` key or interrupt), your current shell directory remains unchanged.
+  - If a non-existent path or a non-directory file is written, the shell adapter safely warns and remains in the original directory.
+  - Sourced scripts run with localized helper variables, ensuring zero pollution of your active shell scope or existing user traps.
