@@ -203,3 +203,54 @@ def test_node_delete(session):
 
     # Delete non-existent
     assert repo.delete(uuid.uuid4()) is False
+
+
+def test_platformdirs_dependency():
+    """Verify platformdirs is explicitly specified in pyproject.toml."""
+    import tomllib
+
+    pyproject_path = Path(__file__).parent.parent / "pyproject.toml"
+    with open(pyproject_path, "rb") as f:
+        data = tomllib.load(f)
+    deps = data.get("project", {}).get("dependencies", [])
+    assert "platformdirs" in deps
+
+
+def test_engine_pragma_isolation():
+    """Verify connection PRAGMAs are applied only to engines from create_db_engine.
+
+    Ensures they are not registered globally on other SQLAlchemy engines.
+    """
+    from sqlalchemy import create_engine as raw_create_engine
+
+    # 1. Unrelated engine - should NOT have WAL/foreign keys configured automatically
+    unrelated_engine = raw_create_engine("sqlite://")
+    with Session(unrelated_engine) as session:
+        connection = session.connection()
+        fk = connection.execute(text("PRAGMA foreign_keys;")).scalar()
+        assert fk == 0
+
+    # 2. PathTree engine - should be configured with WAL and foreign keys
+    pathtree_engine = create_db_engine(Path(":memory:"))
+    with Session(pathtree_engine) as session:
+        connection = session.connection()
+        fk = connection.execute(text("PRAGMA foreign_keys;")).scalar()
+        assert fk == 1
+
+
+def test_updated_at_increases_on_update(session):
+    """Verify that updated_at increases when a Node is updated."""
+    import time
+
+    repo = NodeRepository(session)
+
+    node = repo.create(Node(name="Test Node", node_type="Folder"))
+    original_updated_at = node.updated_at
+
+    # Wait briefly to ensure a timestamp difference
+    time.sleep(0.01)
+
+    node.name = "Modified Name"
+    updated_node = repo.update(node)
+
+    assert updated_node.updated_at > original_updated_at

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import Field, SQLModel
 
@@ -33,5 +33,9 @@ class Node(SQLModel, table=True):
         default=None, nullable=True
     )  # Optional filesystem directory path
     sort_order: int = Field(default=0, nullable=False)
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC), nullable=False
+    )

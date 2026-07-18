@@ -22,7 +22,6 @@ def get_db_path() -> Path:
     return data_dir / "pathtree.db"
 
 
-@event.listens_for(Engine, "connect")
 def set_sqlite_pragma(dbapi_connection, connection_record) -> None:
     """Apply optimized SQLite pragmas (WAL mode, foreign keys)."""
     cursor = dbapi_connection.cursor()
@@ -35,7 +34,9 @@ def create_db_engine(db_path: Path) -> Engine:
     """Create a new SQLModel engine for the SQLite database."""
     if str(db_path) != ":memory:" and db_path.parent:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(f"sqlite:///{db_path}")
+    engine = create_engine(f"sqlite:///{db_path}")
+    event.listen(engine, "connect", set_sqlite_pragma)
+    return engine
 
 
 def init_db(engine: Engine) -> None:

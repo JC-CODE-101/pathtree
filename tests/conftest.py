@@ -1,13 +1,15 @@
-import pytest
-from sqlmodel import Session, create_engine
+from pathlib import Path
 
-from pathtree.database.connection import init_db
+import pytest
+from sqlmodel import Session
+
+from pathtree.database.connection import create_db_engine, init_db
 
 
 @pytest.fixture(name="engine")
 def engine_fixture():
     """Fixture for an in-memory SQLModel engine."""
-    engine = create_engine("sqlite://")
+    engine = create_db_engine(Path(":memory:"))
     init_db(engine)
     return engine
 

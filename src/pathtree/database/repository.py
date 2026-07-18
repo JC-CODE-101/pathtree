@@ -76,6 +76,9 @@ class NodeRepository:
         Returns:
             The updated Node object.
         """
+        from datetime import UTC, datetime
+
+        node.updated_at = datetime.now(UTC)
         self.session.add(node)
         self.session.commit()
         self.session.refresh(node)
