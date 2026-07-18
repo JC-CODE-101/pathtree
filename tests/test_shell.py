@@ -29,6 +29,11 @@ import sys
 import os
 import signal
 
+marker_path = os.environ.get("FAKE_PATHTREE_MARKER")
+if marker_path:
+    with open(marker_path, "w") as marker_file:
+        marker_file.write("invoked")
+
 if os.environ.get("FAKE_PATHTREE_SIGINT") == "1":
     os.kill(os.getpid(), signal.SIGINT)
     sys.exit(130)
@@ -475,10 +480,14 @@ else
 fi
 echo "STATUS: $pb_status"
 """
-    # Instruct fake mktemp to fail
-    env = {"FAKE_MKTEMP_FAIL": "1"}
-
     with tempfile.TemporaryDirectory() as tmp_dir:
+        marker_file = os.path.join(tmp_dir, "marker.txt")
+        # Instruct fake mktemp to fail and set the marker path for fake pathtree
+        env = {
+            "FAKE_MKTEMP_FAIL": "1",
+            "FAKE_PATHTREE_MARKER": marker_file,
+        }
+
         ret, stdout, stderr = run_shell(
             shell, script, fake_bin_dir, tmp_dir, env
         )
@@ -490,5 +499,7 @@ echo "STATUS: $pb_status"
             line.startswith("STATUS: ") and line != "STATUS: 0" for line in lines
         )
         assert has_nonzero
+        # Ensure pathtree was never invoked (marker file does not exist)
+        assert not os.path.exists(marker_file)
         # Ensure no temporary file artifacts remain
         assert len(os.listdir(tmp_dir)) == 0
