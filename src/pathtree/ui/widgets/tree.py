@@ -7,7 +7,7 @@ from textual.binding import Binding
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode as TextualTreeNode
 
-from pathtree.services.node_service import NodeService, TreeNode
+from pathtree.services.node_service import NodeService, NodeServiceError, TreeNode
 
 
 class NodeTreeView(Tree[uuid.UUID]):
@@ -42,7 +42,7 @@ class NodeTreeView(Tree[uuid.UUID]):
                 self.add_node_recursive(self.root, tree_node)
             if not self.show_root and self.root.children:
                 self.move_cursor(self.root.children[0])
-        except Exception as e:
+        except NodeServiceError as e:
             self.load_error = str(e)
 
     def add_node_recursive(
