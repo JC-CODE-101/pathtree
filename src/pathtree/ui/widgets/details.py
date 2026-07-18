@@ -8,9 +8,9 @@ from pathtree.models.node import Node
 class NodeDetailsPanel(Static):
     """Widget displaying detailed information about the highlighted node."""
 
-    def on_mount(self) -> None:
-        """Set initial status message on mount."""
-        self.update_node(None)
+    def __init__(self, **kwargs) -> None:
+        """Initialize the NodeDetailsPanel with default text."""
+        super().__init__("No node selected.", **kwargs)
 
     def update_node(self, node: Node | None) -> None:
         """Update the panel with details of the provided node.

@@ -191,3 +191,61 @@ async def test_q_exits_safely(session: Session) -> None:
             await pilot.pause(0.01)
 
         assert app.return_code == 0
+
+
+@pytest.mark.asyncio
+async def test_cyclic_database_handled_gracefully(session: Session) -> None:
+    """Test that database cycle error is handled gracefully on startup."""
+    repo = NodeRepository(session)
+    node_a = repo.create(Node(name="A", parent_id=None))
+    node_b = repo.create(Node(name="B", parent_id=None))
+
+    node_a.parent_id = node_b.id
+    node_b.parent_id = node_a.id
+
+    repo.update(node_a)
+    repo.update(node_b)
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        # Wait for main screen to load
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # The tree view should be empty
+        tree = app.screen.query_one("#tree-view")
+        assert len(tree.root.children) == 0
+
+        # The details panel should display the cycle error message
+        details = app.screen.query_one("#details-panel")
+        assert "Cycle detected" in details.render().plain
+
+
+@pytest.mark.asyncio
+async def test_enter_activation_without_output_file(
+    session: Session, tmp_path: Path
+) -> None:
+    """Test that Enter on a node without an output file specified does not exit."""
+    repo = NodeRepository(session)
+    valid_dir = tmp_path / "valid_dir"
+    valid_dir.mkdir()
+    repo.create(Node(name="Root", path=str(valid_dir), sort_order=1))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service, output=None)
+    async with app.run_test() as pilot:
+        # Wait for main screen to load
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        await pilot.press("enter")
+
+        # App should still be running / not exited
+        assert app.return_code is None
+
+        # Details panel should display the error about missing output file
+        details = app.screen.query_one("#details-panel")
+        assert "No output file specified" in details.render().plain

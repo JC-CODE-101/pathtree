@@ -7,8 +7,7 @@ from textual.binding import Binding
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode as TextualTreeNode
 
-from pathtree.models.node import Node
-from pathtree.services.node_service import NodeService
+from pathtree.services.node_service import NodeService, TreeNode
 
 
 class NodeTreeView(Tree[uuid.UUID]):
@@ -30,27 +29,33 @@ class NodeTreeView(Tree[uuid.UUID]):
         super().__init__("Root", **kwargs)
         self.node_service = node_service
         self.show_root = False
+        self.load_error: str | None = None
         self.populate_tree()
 
     def populate_tree(self) -> None:
         """Populate branches from service-provided nodes recursively."""
         self.clear()
-        roots = self.node_service.load_root_nodes()
-        for root_node in roots:
-            self.add_node_recursive(self.root, root_node)
-        if not self.show_root and self.root.children:
-            self.move_cursor(self.root.children[0])
+        self.load_error = None
+        try:
+            tree_nodes = self.node_service.get_validated_tree()
+            for tree_node in tree_nodes:
+                self.add_node_recursive(self.root, tree_node)
+            if not self.show_root and self.root.children:
+                self.move_cursor(self.root.children[0])
+        except Exception as e:
+            self.load_error = str(e)
 
     def add_node_recursive(
-        self, parent_tree_node: TextualTreeNode[uuid.UUID], db_node: Node
+        self, parent_tree_node: TextualTreeNode[uuid.UUID], app_tree_node: TreeNode
     ) -> None:
-        """Recursively load and add child nodes to the tree.
+        """Recursively add TreeNode hierarchy to the display tree.
 
         Args:
             parent_tree_node: The parent Tree node to attach to.
-            db_node: The Node from the database to attach.
+            app_tree_node: The TreeNode from the service layer to attach.
         """
-        children = self.node_service.load_children(db_node.id)
+        db_node = app_tree_node.node
+        children = app_tree_node.children
         if children:
             tree_node = parent_tree_node.add(
                 db_node.name, data=db_node.id, expand=False

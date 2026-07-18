@@ -224,3 +224,12 @@ class NodeService:
             The Node object if found, otherwise None.
         """
         return self.repository.get_by_id(node_id)
+
+    def get_validated_tree(self) -> list[TreeNode]:
+        """Fetch all nodes and build a cycle-protected nested tree structure.
+
+        Raises:
+            CycleError: If a loop/cycle is detected in the hierarchy.
+        """
+        flat_nodes = self.repository.list_all()
+        return self.build_tree(flat_nodes)

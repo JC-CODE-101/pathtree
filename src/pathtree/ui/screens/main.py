@@ -9,7 +9,7 @@ from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Tree
 
-from pathtree.services.node_service import NodeService
+from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.widgets.details import NodeDetailsPanel
 from pathtree.ui.widgets.tree import NodeTreeView
 
@@ -56,12 +56,19 @@ class MainScreen(Screen[None]):
         """Focus the tree view on startup and show initial selection."""
         tree = self.query_one("#tree-view", NodeTreeView)
         tree.focus()
-        if tree.cursor_node is not None and tree.cursor_node.data is not None:
+        details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+        if tree.load_error:
+            details_panel.update_error(tree.load_error)
+        elif tree.cursor_node is not None and tree.cursor_node.data is not None:
             node = self.node_service.get_node(tree.cursor_node.data)
-            self.query_one("#details-panel", NodeDetailsPanel).update_node(node)
+            details_panel.update_node(node)
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[uuid.UUID]) -> None:
         """Update the details panel whenever the highlighted node changes."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+        if tree.load_error:
+            return
+
         node_id = event.node.data
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
         if node_id is None:
@@ -90,12 +97,17 @@ class MainScreen(Screen[None]):
 
     def activate_node(self, node_id: uuid.UUID) -> None:
         """Resolve node path and handle activation."""
+        details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+        if not self.output_path:
+            details_panel.update_error(
+                "No output file specified. Activation requires the --output option."
+            )
+            return
+
         try:
             resolved_path = self.node_service.resolve_node_path(node_id)
-            if self.output_path:
-                with open(self.output_path, "w", encoding="utf-8") as f:
-                    f.write(str(resolved_path.absolute()))
+            with open(self.output_path, "w", encoding="utf-8") as f:
+                f.write(str(resolved_path.absolute()))
             self.app.exit(return_code=0)
-        except Exception as e:
-            details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+        except (NodeServiceError, OSError) as e:
             details_panel.update_error(str(e))
