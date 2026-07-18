@@ -42,9 +42,15 @@ def seed_development_data(repository: NodeRepository) -> None:
     home_ws = get_or_create("Home Workspace", "Workspace", str(home_dir), None, 1)
     temp_ws = get_or_create("Temporary Directory", "Workspace", str(temp_dir), None, 2)
 
-    # Seed sub-nodes under Home Workspace
-    get_or_create("Documents", "Folder", str(home_dir / "Documents"), home_ws.id, 1)
-    get_or_create("Downloads", "Folder", str(home_dir / "Downloads"), home_ws.id, 2)
+    # Seed sub-nodes under Home Workspace only if they exist on the filesystem
+    docs_path = home_dir / "Documents"
+    if docs_path.is_dir():
+        get_or_create("Documents", "Folder", str(docs_path), home_ws.id, 1)
+
+    downloads_path = home_dir / "Downloads"
+    if downloads_path.is_dir():
+        get_or_create("Downloads", "Folder", str(downloads_path), home_ws.id, 2)
+
     get_or_create("Current Project", "Folder", str(Path.cwd()), home_ws.id, 3)
 
     # Seed sub-nodes under Temp Workspace

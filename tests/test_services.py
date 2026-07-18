@@ -12,6 +12,7 @@ from pathtree.database.repository import NodeRepository
 from pathtree.models.node import Node
 from pathtree.services.node_service import (
     CycleError,
+    NodeNotFoundError,
     NodeService,
     NoPathError,
     ParentNotFoundError,
@@ -157,6 +158,12 @@ def test_protection_against_malformed_cyclic_database_data(
 
     with pytest.raises(CycleError):
         node_service.build_tree(flat_nodes)
+
+
+def test_resolve_path_for_nonexistent_node(node_service: NodeService) -> None:
+    """Test that path resolution for an unknown node ID raises NodeNotFoundError."""
+    with pytest.raises(NodeNotFoundError):
+        node_service.resolve_node_path(uuid.uuid4())
 
 
 def test_valid_directory_path_resolution(

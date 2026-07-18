@@ -22,6 +22,10 @@ class ParentNotFoundError(NodeServiceError):
     """Raised when a parent node reference does not exist in the database."""
 
 
+class NodeNotFoundError(NodeServiceError):
+    """Raised when a requested node does not exist in the database."""
+
+
 class NoPathError(NodeServiceError):
     """Raised when a node does not have a configured path."""
 
@@ -183,6 +187,7 @@ class NodeService:
 
         Returns a valid normalized Path only when the node contains an
         existing directory. Clearly distinguishes:
+          - node does not exist (raises NodeNotFoundError)
           - node has no path (raises NoPathError)
           - path does not exist (raises PathNotFoundError)
           - path exists but is not a directory (raises PathNotADirectoryError)
@@ -191,7 +196,7 @@ class NodeService:
         """
         node = self.repository.get_by_id(node_id)
         if node is None:
-            raise ParentNotFoundError(f"Node {node_id} does not exist.")
+            raise NodeNotFoundError(f"Node {node_id} does not exist.")
 
         if not node.path:
             raise NoPathError(f"Node '{node.name}' ({node_id}) has no configured path.")
