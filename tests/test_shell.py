@@ -106,9 +106,7 @@ def run_shell(shell_cmd, script, fake_bin_dir, tmp_dir_path, env=None):
     return proc.returncode, proc.stdout, proc.stderr
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_successful_directory_change(shell, fake_bin_dir):
     with tempfile.TemporaryDirectory() as user_dir:
         target_dir = os.path.join(user_dir, "my_target_dir")
@@ -123,18 +121,14 @@ pwd
         env = {"FAKE_PATHTREE_OUTPUT": target_dir, "FAKE_PATHTREE_EXIT": "0"}
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ret, stdout, stderr = run_shell(
-                shell, script, fake_bin_dir, tmp_dir, env
-            )
+            ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
             assert ret == 0, stderr
             lines = stdout.strip().splitlines()
             assert lines[-1] == os.path.realpath(target_dir)
             assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_path_with_spaces(shell, fake_bin_dir):
     with tempfile.TemporaryDirectory() as user_dir:
         target_dir = os.path.join(user_dir, "my target dir with spaces")
@@ -149,18 +143,14 @@ pwd
         env = {"FAKE_PATHTREE_OUTPUT": target_dir, "FAKE_PATHTREE_EXIT": "0"}
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ret, stdout, stderr = run_shell(
-                shell, script, fake_bin_dir, tmp_dir, env
-            )
+            ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
             assert ret == 0, stderr
             lines = stdout.strip().splitlines()
             assert lines[-1] == os.path.realpath(target_dir)
             assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_empty_output_no_change(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -178,9 +168,7 @@ echo "STATUS: $pb_status"
     env = {"FAKE_PATHTREE_OUTPUT": "", "FAKE_PATHTREE_EXIT": "0"}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         assert ret == 0, stderr
         lines = stdout.strip().splitlines()
         assert "UNCHANGED" in lines
@@ -188,9 +176,7 @@ echo "STATUS: $pb_status"
         assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_nonexistent_path_no_change(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -211,9 +197,7 @@ echo "STATUS: $pb_status"
     }
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         assert ret == 0, stderr
         lines = stdout.strip().splitlines()
         assert "UNCHANGED" in lines
@@ -225,9 +209,7 @@ echo "STATUS: $pb_status"
         assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_file_instead_of_directory_no_change(shell, fake_bin_dir):
     with tempfile.NamedTemporaryFile() as tmp_file:
         adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
@@ -246,9 +228,7 @@ echo "STATUS: $pb_status"
         env = {"FAKE_PATHTREE_OUTPUT": tmp_file.name, "FAKE_PATHTREE_EXIT": "0"}
 
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ret, stdout, stderr = run_shell(
-                shell, script, fake_bin_dir, tmp_dir, env
-            )
+            ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
             assert ret == 0, stderr
             lines = stdout.strip().splitlines()
             assert "UNCHANGED" in lines
@@ -260,9 +240,7 @@ echo "STATUS: $pb_status"
             assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_failed_cd_no_change(shell, fake_bin_dir):
     with tempfile.TemporaryDirectory() as user_dir:
         # Create directory with no permissions so cd fails (or simulate cd failing)
@@ -304,9 +282,7 @@ echo "STATUS: $pb_status"
             os.chmod(unnavigable_dir, 0o755)
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_nonzero_exit_no_change(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -322,9 +298,7 @@ echo "EXIT_STATUS: $exit_val"
     env = {"FAKE_PATHTREE_OUTPUT": "/some/valid/path", "FAKE_PATHTREE_EXIT": "42"}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         assert ret == 0, stderr
         lines = stdout.strip().splitlines()
         assert "UNCHANGED" in lines
@@ -332,9 +306,7 @@ echo "EXIT_STATUS: $exit_val"
         assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_user_traps_remain_unchanged(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -346,17 +318,13 @@ trap
     env = {"FAKE_PATHTREE_OUTPUT": "", "FAKE_PATHTREE_EXIT": "0"}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         assert ret == 0, stderr
         assert "MyCustomTrap" in stdout
         assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_no_helper_functions_or_global_variables_remain(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -369,9 +337,7 @@ set
     env = {"FAKE_PATHTREE_OUTPUT": "", "FAKE_PATHTREE_EXIT": "0"}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         assert ret == 0, stderr
 
         # Verify that no helper variables leak into global scope.
@@ -400,9 +366,7 @@ set
                     raise AssertionError(f"Leaked variable found in set: {line}")
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_no_parent_shell_signaled(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -413,17 +377,13 @@ echo "STILL_ALIVE"
     env = {"FAKE_PATHTREE_OUTPUT": "", "FAKE_PATHTREE_EXIT": "0"}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         assert ret == 0, stderr
         assert "STILL_ALIVE" in stdout
         assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_real_interruption(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -444,9 +404,7 @@ echo "STILL_ALIVE"
     env = {"FAKE_PATHTREE_SIGINT": "1"}
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         # The parent shell process should continue running successfully
         assert ret == 0, stderr
         lines = stdout.strip().splitlines()
@@ -463,9 +421,7 @@ echo "STILL_ALIVE"
         assert len(os.listdir(tmp_dir)) == 0
 
 
-@pytest.mark.parametrize(
-    "shell", [s for s in ["bash", "zsh"] if shutil.which(s)]
-)
+@pytest.mark.parametrize("shell", [s for s in ["bash", "zsh"] if shutil.which(s)])
 def test_mktemp_failure(shell, fake_bin_dir):
     adapter_path = os.path.abspath(f"shell/pathtree.{shell}")
     script = f"""
@@ -488,9 +444,7 @@ echo "STATUS: $pb_status"
             "FAKE_PATHTREE_MARKER": marker_file,
         }
 
-        ret, stdout, stderr = run_shell(
-            shell, script, fake_bin_dir, tmp_dir, env
-        )
+        ret, stdout, stderr = run_shell(shell, script, fake_bin_dir, tmp_dir, env)
         assert ret == 0, stderr
         lines = stdout.strip().splitlines()
         assert "UNCHANGED" in lines

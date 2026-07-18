@@ -26,7 +26,32 @@ class Node(SQLModel, table=True):
         default="Folder",
         index=True,
         nullable=False,
-    )  # Workspace or Folder
+    )  # Workspace or Folder (DEPRECATED - do not use in new code)
+
+    node_kind: str = Field(
+        default="resource",
+        index=True,
+        nullable=False,
+    )  # workspace | folder | resource
+
+    resource_type: str | None = Field(
+        default=None,
+        index=True,
+        nullable=True,
+    )  # directory | null (for other types in future)
+
+    is_favorite: bool = Field(
+        default=False,
+        index=True,
+        nullable=False,
+    )
+
+    is_temporary: bool = Field(
+        default=False,
+        index=True,
+        nullable=False,
+    )
+
     description: str | None = Field(default=None, nullable=True)
     icon: str | None = Field(default=None, nullable=True)
     path: str | None = Field(
