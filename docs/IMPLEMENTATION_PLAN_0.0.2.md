@@ -30,6 +30,15 @@ Do not model every node as a plain directory. Instead, we introduce a clear arch
 
 > **Milestone 0.0.2 Scope Limit**: Only the **directory** resource type is implemented in Milestone 0.0.2. The other resource types are defined and documented as architecture placeholders only; no execution or runtime support is added for them in this release.
 
+### B. Valid Combinations and Service Boundary Validation
+To ensure data integrity, the `NodeService` enforces strict validation on node attributes.
+Only the following specific combinations of `node_kind` and `resource_type` are valid in Milestone 0.0.2:
+- `node_kind = "workspace"` and `resource_type = None`
+- `node_kind = "folder"` and `resource_type = None`
+- `node_kind = "resource"` and `resource_type = "directory"`
+
+> **Rejection Rule**: Any other combination (e.g. `node_kind = "workspace"` with a resource_type, or `node_kind = "resource"` with a null resource_type) is **strictly rejected** at the `NodeService` boundary, raising a `ValidationError`.
+
 ---
 
 ## 2. Technical Specifications & Behavioral Rules
@@ -107,15 +116,26 @@ All other metadata validations, filesystem checks, and UI rendering are handled 
 ### A. SQLite Schema Evolution
 To support the conceptual structural/resource separation and favorites, the schema evolves from `user_version 1` to `user_version 2`.
 
+#### Python Model Attribute Map
+`src/pathtree/models/node.py` is updated to include the new fields. To maintain architectural flexibility, `resource_type` defaults to `None` in SQLModel:
+
 ```python
-# New fields on Node model
 node_kind: str = Field(default="resource", index=True, nullable=False) # workspace | folder | resource
-resource_type: str | None = Field(default="directory", index=True, nullable=True) # directory | null (for other types in future)
+resource_type: str | None = Field(default=None, index=True, nullable=True) # directory | null (for other types in future)
 is_favorite: bool = Field(default=False, index=True, nullable=False)
 is_temporary: bool = Field(default=False, index=True, nullable=False)
 ```
 
-### B. Detailed Migration Specification
+> **Explicit Assignment**: When creating or saving a `"resource"` kind node, the `NodeService` explicitly assigns the value `"directory"` to `resource_type`.
+
+### B. Legacy `node_type` Transition Strategy
+The old `node_type` column is completely phased out of the domain:
+- **Sole Source of Truth**: After the migration is applied, `node_kind` and `resource_type` represent the **sole domain source of truth** for all application logic.
+- **Code Constraint**: New application code and CRUD methods must **not read or write** the legacy `node_type` column.
+- **Backward Compatibility**: The physical column `node_type` remains physically present in the SQLite schema database for safety during Milestone 0.0.2 but is marked as explicitly deprecated.
+- **Future Rebuild**: A future schema cleanup migration (such as Milestone 0.1.0) may perform a table rebuild (`ALTER TABLE ... DROP COLUMN` or temporary copy rebuild) to remove the deprecated column entirely.
+
+### C. Detailed Migration Specification
 1. **Fresh Database Creation**:
    - If the database file is newly created, tables are initialized directly with the current user_version 2 schema, and `PRAGMA user_version = 2;` is run. No legacy migrations are applied.
 2. **Version 1 Migration**:
@@ -172,14 +192,9 @@ Milestone 0.0.2 is structured into five sequential, highly focused, and reviewab
 - **Scope**: Database schema evolution to `user_version 2`.
 - **Deliverables**:
   - Update `Node` model with `node_kind`, `resource_type`, `is_favorite`, and `is_temporary`.
-  - Implement full schema migration logic in `database/connection.py` covering:
-    - Fresh database setup (v2 directly)
-    - Version 1 migration script with structural data transformations
-    - Rejection of `user_version > 2` on startup
-    - Transactional rollbacks and idempotent index creation
+  - Implement full schema migration logic in `database/connection.py` covering legacy transition strategies, valid combination constraints, and transactional safety.
 - **Verification & Tests**:
   - Write migration tests verifying version 1 upgrade logic, data conversion rules, and rollback states.
-  - Test fresh boots and multiple consecutive restarts.
 - **Definition of Done**:
   - SQLite schema migrations are completely transactional, idempotent, and pass 100% of test cases.
 
@@ -218,18 +233,32 @@ Milestone 0.0.2 is structured into five sequential, highly focused, and reviewab
 
 ---
 
-### PR 4: Interactive Creation Dialogs & Recursive Modals
+### PR 4: Interactive Creation, Editing, & Relocation UI Dialogs
 
 - **Dependency Order**: Depends on PR 3.
-- **Scope**: Creation form flows, warning dialogs, and deletion confirmations.
+- **Scope**: Form dialogues, warning validation screens, relocation selectors, and deletion confirmations.
 - **Deliverables**:
-  - Form dialogs in `ui/screens/dialogs.py` supporting Workspace, Folder, and Directory options only (disallowing demotion or other resource types).
-  - Add path verification warning display (non-blocking for creation, blocking for execution).
-  - Add deletion confirmation popup displaying affected descendant counts.
+  - **Add Node**: Multi-stage dialogue (Workspace, Folder, Directory only; disallow unimplemented types).
+  - **Edit Node**:
+    - Accessible via shortcut `e`.
+    - Fully supports editing Name, Description, and Directory Path where applicable.
+    - Fully supports toggling Favorite state and Promoting a temporary node to permanent (updating `is_temporary` to `False`).
+    - **Strict Limitation**: Prohibit any arbitrary conversion between structural kinds (`workspace`/`folder`) and resource types.
+  - **Move Node**:
+    - Accessible via shortcut `m`.
+    - Allows choosing the Root (`None`), a Workspace, or a Folder as the new parent.
+    - **Parent Restraints**: Explicitly exclude Resource nodes and the virtual Favorites container as parent choices.
+    - Cycle validation check and sibling uniqueness validation check are strictly run.
+    - Immediate tree refresh executes upon successful movement.
+  - **Delete Node**: Confirms cascading deletions showing the affected descendant counts.
 - **Verification & Tests**:
-  - Async UI tests verifying interactive form saves, warning dialog bypasses, and descendant count popups.
+  - Write detailed UI tests using Textual `App.run_test()` to verify:
+    - Successful Editing and Relocating interactions.
+    - Verification of keyboard shortcuts `e` and `m` triggering respective modals.
+    - Cancellation handling for all dialogs (ensuring no database mutations on escape/cancel).
+    - Validation error rendering (circular parent check and sibling name clashes).
 - **Definition of Done**:
-  - Modals are fully keyboard-navigable and handle inputs correctly.
+  - Modals are fully keyboard-navigable. Interactive operations update the tree immediately.
 
 ---
 
