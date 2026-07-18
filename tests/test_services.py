@@ -265,6 +265,11 @@ def test_normal_cli_startup_not_creating_seed_data(monkeypatch, tmp_path: Path) 
     dummy_output = tmp_path / "dummy.txt"
     monkeypatch.setattr(sys, "argv", ["pathtree", "--output", str(dummy_output)])
 
+    # Mock PathTreeApp.run so it doesn't start the interactive TUI in unit tests
+    from pathtree.ui.app import PathTreeApp
+
+    monkeypatch.setattr(PathTreeApp, "run", lambda self: None)
+
     # Ensure no node table rows are seeded automatically
     with pytest.raises(SystemExit) as exc_info:
         main()

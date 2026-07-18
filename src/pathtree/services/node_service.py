@@ -213,3 +213,23 @@ class NodeService:
             )
 
         return path
+
+    def get_node(self, node_id: uuid.UUID) -> Node | None:
+        """Retrieve a node by its ID through the service.
+
+        Args:
+            node_id: The UUID of the node to retrieve.
+
+        Returns:
+            The Node object if found, otherwise None.
+        """
+        return self.repository.get_by_id(node_id)
+
+    def get_validated_tree(self) -> list[TreeNode]:
+        """Fetch all nodes and build a cycle-protected nested tree structure.
+
+        Raises:
+            CycleError: If a loop/cycle is detected in the hierarchy.
+        """
+        flat_nodes = self.repository.list_all()
+        return self.build_tree(flat_nodes)

@@ -3,6 +3,7 @@ import sys
 
 from pathtree.database.connection import get_session
 from pathtree.database.repository import NodeRepository
+from pathtree.services.node_service import NodeService
 from pathtree.services.seed import seed_development_data
 
 
@@ -32,10 +33,13 @@ def main() -> None:
         print("Development seed data populated successfully.")
         sys.exit(0)
 
-    if args.output:
-        print(f"PathTree CLI invoked. Output path registered: {args.output}")
-    else:
-        print("PathTree CLI invoked.")
+    with get_session() as session:
+        repository = NodeRepository(session)
+        node_service = NodeService(repository)
+        from pathtree.ui.app import PathTreeApp
+
+        app = PathTreeApp(node_service=node_service, output=args.output)
+        app.run()
 
     sys.exit(0)
 
