@@ -30,6 +30,18 @@ class NodeNotFoundError(NodeServiceError):
     """Raised when a requested node does not exist in the database."""
 
 
+class InvalidParentKindError(NodeServiceError):
+    """Raised when parent node is a resource node or other invalid kind."""
+
+
+class DuplicateSiblingNameError(NodeServiceError):
+    """Raised when a sibling node already has the same normalized name."""
+
+
+class EmptyNodeNameError(NodeServiceError):
+    """Raised when a node name is empty after trimming."""
+
+
 class NoPathError(NodeServiceError):
     """Raised when a node does not have a configured path."""
 
@@ -145,27 +157,40 @@ class NodeService:
 
         return [build_subtree(root) for root in ordered_roots]
 
-    def validate_parent(self, node_id: uuid.UUID, parent_id: uuid.UUID | None) -> None:
+    def validate_parent(
+        self,
+        node_id: uuid.UUID | None,
+        parent_id: uuid.UUID | None,
+    ) -> None:
         """Validate parent-child relationship to prevent invalid hierarchies.
 
         - Prevents a node from becoming its own parent.
         - Prevents moving a node below one of its descendants.
         - Rejects references to nonexistent parent nodes.
+        - Rejects parent nodes that are resources (InvalidParentKindError).
 
         Raises clear, project-specific exceptions for invalid operations.
         """
+        if parent_id is None:
+            return
+
         # 1. Prevent a node from becoming its own parent
-        if parent_id is not None and node_id == parent_id:
+        if node_id is not None and node_id == parent_id:
             raise SelfParentError(f"Node {node_id} cannot be its own parent.")
 
         # 2. Reject references to nonexistent parent nodes
-        if parent_id is not None:
-            parent_node = self.repository.get_by_id(parent_id)
-            if parent_node is None:
-                raise ParentNotFoundError(f"Parent node {parent_id} does not exist.")
+        parent_node = self.repository.get_by_id(parent_id)
+        if parent_node is None:
+            raise ParentNotFoundError(f"Parent node {parent_id} does not exist.")
 
-        # 3. Prevent moving a node below one of its descendants
-        if parent_id is not None:
+        # 3. Rejects parent nodes that are resources
+        if parent_node.node_kind == "resource":
+            raise InvalidParentKindError(
+                f"Parent node {parent_id} cannot be of kind 'resource'."
+            )
+
+        if node_id is not None:
+            # 4. Prevent moving a node below one of its descendants
             curr_id: uuid.UUID | None = parent_id
             visited = set()
             while curr_id is not None:
@@ -181,8 +206,6 @@ class NodeService:
 
                 p_node = self.repository.get_by_id(curr_id)
                 if p_node is None:
-                    # Nonexistent reference should have been caught,
-                    # but we handle it gracefully here.
                     raise ParentNotFoundError(f"Parent node {curr_id} does not exist.")
                 curr_id = p_node.parent_id
 
@@ -264,3 +287,306 @@ class NodeService:
             raise ValidationError(
                 f"Invalid combination: node_kind='{kind}', resource_type='{res_type}'."
             )
+
+    def create_node(
+        self,
+        name: str,
+        node_kind: str,
+        resource_type: str | None = None,
+        parent_id: uuid.UUID | None = None,
+        path: str | None = None,
+        description: str | None = None,
+        icon: str | None = None,
+        is_favorite: bool = False,
+        is_temporary: bool = False,
+        sort_order: int = 0,
+    ) -> Node:
+        """Create a new node after performing validations.
+
+        Validations:
+        - name trimming & empty check
+        - parent validation
+        - sibling name uniqueness check under the same parent
+        - combination check of node_kind and resource_type
+        - structural node contains no path check
+        """
+        # 1. Trim name and reject empty names
+        if name is None:
+            raise EmptyNodeNameError("Name cannot be None.")
+        trimmed_name = name.strip()
+        if not trimmed_name:
+            raise EmptyNodeNameError("Name cannot be empty after trimming.")
+
+        # 2. Validate requested parent (if parent_id is not None)
+        self.validate_parent(None, parent_id)
+
+        # 3. Validate sibling-name uniqueness
+        if self.repository.has_sibling_with_name(parent_id, trimmed_name):
+            raise DuplicateSiblingNameError(
+                f"A sibling node with the name '{trimmed_name}' already exists."
+            )
+
+        # 4. Normalize directory paths where safely possible without requiring existence
+        import os
+
+        normalized_path = None
+        if path is not None:
+            trimmed_path = path.strip()
+            if trimmed_path:
+                normalized_path = os.path.normpath(trimmed_path)
+
+        # 5. Check structural workspace and folder nodes must not contain a path
+        if node_kind in ("workspace", "folder") and normalized_path is not None:
+            raise ValidationError("Structural nodes must not contain a path.")
+
+        # 6. Assign resource_type="directory" explicitly for directory resources
+        if node_kind == "resource" and resource_type is None:
+            resource_type = "directory"
+
+        node = Node(
+            name=trimmed_name,
+            node_kind=node_kind,
+            resource_type=resource_type,
+            parent_id=parent_id,
+            path=normalized_path,
+            description=description,
+            icon=icon,
+            is_favorite=is_favorite,
+            is_temporary=is_temporary,
+            sort_order=sort_order,
+        )
+
+        self.validate_node(node)
+        return self.repository.create(node)
+
+    def update_node(self, node_id: uuid.UUID, **kwargs) -> Node:
+        """Update an existing node after performing validations.
+
+        Modifies name, description, icon, path, sort_order, is_favorite, is_temporary.
+        Supports temporary promotion to permanent.
+        Rejects conversion of permanent to temporary.
+        Rejects arbitrary node_kind / resource_type conversions.
+        Structural nodes must not retain a path.
+        """
+        node = self.repository.get_by_id(node_id)
+        if node is None:
+            raise NodeNotFoundError(f"Node {node_id} does not exist.")
+
+        if "parent_id" in kwargs:
+            raise ValidationError(
+                "To change parent, use move_node instead of update_node."
+            )
+
+        # Check node_kind and resource_type change rejections
+        if "node_kind" in kwargs and kwargs["node_kind"] != node.node_kind:
+            raise ValidationError("Converting between node kinds is not allowed.")
+        if "resource_type" in kwargs and kwargs["resource_type"] != node.resource_type:
+            raise ValidationError("Changing resource type is not allowed.")
+
+        # Check temporary to permanent demotion rules
+        if "is_temporary" in kwargs:
+            val = kwargs["is_temporary"]
+            if val is True and not node.is_temporary:
+                raise ValidationError("Permanent nodes cannot be demoted to temporary.")
+            node.is_temporary = val
+
+        # Handle name change
+        if "name" in kwargs:
+            new_name = kwargs["name"]
+            if new_name is None:
+                raise EmptyNodeNameError("Name cannot be None.")
+            trimmed_name = new_name.strip()
+            if not trimmed_name:
+                raise EmptyNodeNameError("Name cannot be empty after trimming.")
+            if self.repository.has_sibling_with_name(
+                node.parent_id, trimmed_name, exclude_id=node.id
+            ):
+                raise DuplicateSiblingNameError(
+                    f"A sibling node with the name '{trimmed_name}' already exists."
+                )
+            node.name = trimmed_name
+
+        # Handle path change
+        if "path" in kwargs:
+            import os
+
+            new_path = kwargs["path"]
+            normalized_path = None
+            if new_path is not None:
+                trimmed_path = new_path.strip()
+                if trimmed_path:
+                    normalized_path = os.path.normpath(trimmed_path)
+
+            if (
+                node.node_kind in ("workspace", "folder")
+                and normalized_path is not None
+            ):
+                raise ValidationError("Structural nodes must not contain a path.")
+            node.path = normalized_path
+
+        # Handle description, icon, sort_order, is_favorite
+        if "description" in kwargs:
+            node.description = kwargs["description"]
+        if "icon" in kwargs:
+            node.icon = kwargs["icon"]
+        if "sort_order" in kwargs:
+            node.sort_order = kwargs["sort_order"]
+        if "is_favorite" in kwargs:
+            node.is_favorite = kwargs["is_favorite"]
+
+        # Final checks
+        self.validate_node(node)
+        if node.node_kind in ("workspace", "folder") and node.path is not None:
+            raise ValidationError("Structural nodes must not contain a path.")
+
+        return self.repository.update(node)
+
+    def move_node(self, node_id: uuid.UUID, new_parent_id: uuid.UUID | None) -> Node:
+        """Move a node to a new parent atomically.
+
+        Allows root, workspace, or folder as destinations.
+        Rejects resource parents, self-parenting, and descendant cycle.
+        Enforces sibling uniqueness in the destination.
+        Returns unchanged node immediately if moving to current parent (safe no-op).
+        """
+        node = self.repository.get_by_id(node_id)
+        if node is None:
+            raise NodeNotFoundError(f"Node {node_id} does not exist.")
+
+        # Safe no-op if moving to current parent
+        if node.parent_id == new_parent_id:
+            return node
+
+        # Validate parent kind and cycle / self-parenting
+        self.validate_parent(node_id, new_parent_id)
+
+        # Validate sibling name clash in destination
+        if self.repository.has_sibling_with_name(
+            new_parent_id, node.name, exclude_id=node.id
+        ):
+            raise DuplicateSiblingNameError(
+                f"A sibling with name '{node.name}' already exists in the destination."
+            )
+
+        node.parent_id = new_parent_id
+        return self.repository.update(node)
+
+    def count_descendants(self, node_id: uuid.UUID) -> int:
+        """Count all descendants of a given node.
+
+        Raises NodeNotFoundError if the node does not exist.
+        """
+        node = self.repository.get_by_id(node_id)
+        if node is None:
+            raise NodeNotFoundError(f"Node {node_id} does not exist.")
+        return len(self.repository.get_descendants(node_id))
+
+    def delete_node(self, node_id: uuid.UUID, recursive: bool = True) -> bool:
+        """Delete a node and its descendants if recursive=True.
+
+        If recursive=False and descendants exist, raises a ValidationError.
+        Raises NodeNotFoundError if the node does not exist.
+        """
+        node = self.repository.get_by_id(node_id)
+        if node is None:
+            raise NodeNotFoundError(f"Node {node_id} does not exist.")
+
+        if not recursive:
+            descendants = self.repository.get_descendants(node_id)
+            if descendants:
+                raise ValidationError(
+                    f"Node {node_id} has descendants and "
+                    "cannot be deleted non-recursively."
+                )
+
+        self.repository.delete_recursive(node_id)
+        return True
+
+    def search_nodes(
+        self,
+        query: str | None = None,
+        type_filter: str | None = None,
+    ) -> list[TreeNode]:
+        """Perform search and return a filtered tree of TreeNodes.
+
+        Parses query if it has a 'type:...' filter pattern or handles them directly.
+        Returns the entire tree if both query and type_filter are empty or None.
+        Preserves complete ancestor chains for matching nodes.
+        """
+        clean_query = query
+        actual_type_filter = type_filter
+
+        if query:
+            parts = query.split()
+            filtered_parts = []
+            for part in parts:
+                if part.startswith("type:"):
+                    tf_val = part[5:].lower()
+                    if tf_val in ("workspace", "folder", "directory"):
+                        actual_type_filter = tf_val
+                else:
+                    filtered_parts.append(part)
+            clean_query = " ".join(filtered_parts) if filtered_parts else None
+
+        # Build full tree
+        full_tree = self.get_validated_tree()
+
+        # If no clean_query and no actual_type_filter, return the full tree
+        if not clean_query and not actual_type_filter:
+            return full_tree
+
+        # Helper to recursively filter a TreeNode
+        def filter_node(tree_node: TreeNode) -> TreeNode | None:
+            # 1. Filter children recursively
+            filtered_children = []
+            for child in tree_node.children:
+                res = filter_node(child)
+                if res is not None:
+                    filtered_children.append(res)
+
+            # 2. Check if this node matches itself
+            matches_self = True
+
+            # Match query
+            if clean_query:
+                q = clean_query.casefold()
+                name_match = q in tree_node.node.name.casefold()
+                path_match = (
+                    tree_node.node.path is not None
+                    and q in tree_node.node.path.casefold()
+                )
+                desc_match = (
+                    tree_node.node.description is not None
+                    and q in tree_node.node.description.casefold()
+                )
+                if not (name_match or path_match or desc_match):
+                    matches_self = False
+
+            # Match type_filter
+            if matches_self and actual_type_filter:
+                kind = tree_node.node.node_kind
+                res_type = tree_node.node.resource_type
+                if actual_type_filter == "workspace":
+                    if kind != "workspace":
+                        matches_self = False
+                elif actual_type_filter == "folder":
+                    if kind != "folder":
+                        matches_self = False
+                elif actual_type_filter == "directory":
+                    if not (kind == "resource" and res_type == "directory"):
+                        matches_self = False
+
+            # Keep node if it matches itself OR if it has any matched descendants
+            if matches_self or filtered_children:
+                return TreeNode(tree_node.node, filtered_children)
+
+            return None
+
+        # Apply filtering to all root-level TreeNodes
+        filtered_roots = []
+        for root in full_tree:
+            filtered_root = filter_node(root)
+            if filtered_root is not None:
+                filtered_roots.append(filtered_root)
+
+        return filtered_roots

@@ -99,3 +99,56 @@ class NodeRepository:
             self.session.commit()
             return True
         return False
+
+    def get_descendants(self, node_id: uuid.UUID) -> list[Node]:
+        """Fetch all descendants of node_id recursively."""
+        descendants = []
+        queue = [node_id]
+        while queue:
+            curr_id = queue.pop(0)
+            statement = select(Node).where(Node.parent_id == curr_id)
+            children = self.session.exec(statement).all()
+            for child in children:
+                descendants.append(child)
+                queue.append(child.id)
+        return descendants
+
+    def delete_recursive(self, node_id: uuid.UUID) -> int:
+        """Atomically delete node_id and all its descendants.
+
+        Returns the number of descendants deleted.
+        """
+        descendants = self.get_descendants(node_id)
+        try:
+            for desc in reversed(descendants):
+                self.session.delete(desc)
+                self.session.flush()
+            node = self.session.get(Node, node_id)
+            if node:
+                self.session.delete(node)
+                self.session.flush()
+            self.session.commit()
+            return len(descendants)
+        except Exception as e:
+            self.session.rollback()
+            raise e
+
+    def has_sibling_with_name(
+        self,
+        parent_id: uuid.UUID | None,
+        name: str,
+        exclude_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Check if any sibling under parent_id has the same normalized name.
+
+        Normalization rule: strip and casefold.
+        """
+        statement = select(Node).where(Node.parent_id == parent_id)
+        siblings = self.session.exec(statement).all()
+        normalized_target = name.strip().casefold()
+        for sib in siblings:
+            if exclude_id is not None and sib.id == exclude_id:
+                continue
+            if sib.name.strip().casefold() == normalized_target:
+                return True
+        return False
