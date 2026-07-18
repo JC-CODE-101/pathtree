@@ -426,3 +426,59 @@ def test_node_service_validation(session):
     )
     with pytest.raises(ValidationError):
         node_service.validate_node(n7)
+
+
+def test_unsupported_version_no_table_creation(tmp_path):
+    """Verify that a database with version > 2 is rejected early.
+
+    Even when there is no nodes table present.
+    """
+    db_file = tmp_path / "newer_version_no_table.db"
+
+    # Create empty db with version 3
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA user_version = 3;")
+    conn.commit()
+    conn.close()
+
+    engine = create_db_engine(db_file)
+    with pytest.raises(UnsupportedDatabaseVersionError) as excinfo:
+        init_db(engine)
+    assert "newer than the supported version 2" in str(excinfo.value)
+
+    # Verify version remains 3 and nodes table was NOT created
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    version = cursor.execute("PRAGMA user_version;").fetchone()[0] or 0
+    assert version == 3
+
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='nodes';"
+    )
+    assert cursor.fetchone() is None
+    conn.close()
+    engine.dispose()
+
+
+def test_create_node_without_legacy_node_type(session):
+    """Verify that creating nodes does not require callers to provide legacy node_type.
+
+    This ensures domain code is not coupled to the deprecated column.
+    """
+    repo = NodeRepository(session)
+
+    # 1. Workspace
+    n1 = Node(name="My Workspace", node_kind="workspace")
+    created1 = repo.create(n1)
+    assert created1.legacy_node_type == "Folder"  # should default to Folder in DB
+
+    # 2. Folder
+    n2 = Node(name="My Folder", node_kind="folder")
+    created2 = repo.create(n2)
+    assert created2.legacy_node_type == "Folder"
+
+    # 3. Resource directory
+    n3 = Node(name="My Resource", node_kind="resource", resource_type="directory")
+    created3 = repo.create(n3)
+    assert created3.legacy_node_type == "Folder"

@@ -59,13 +59,19 @@ def init_db(engine: Engine) -> None:
     with Session(engine) as session:
         connection = session.connection()
 
-        # Check if 'nodes' table exists
+        # Read version before any database mutation or table checks
+        version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
+
+        if version > 2:
+            raise UnsupportedDatabaseVersionError(
+                f"Database version {version} is newer than the supported version 2."
+            )
+
+        # Check if 'nodes' table exists after version check
         cursor = connection.execute(
             text("SELECT name FROM sqlite_master WHERE type='table' AND name='nodes';")
         )
         table_exists = cursor.first() is not None
-
-        version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
 
         if not table_exists:
             # Create all tables defined in SQLModel metadata
@@ -73,10 +79,6 @@ def init_db(engine: Engine) -> None:
             # Set user_version to 2
             connection.execute(text("PRAGMA user_version = 2;"))
             session.commit()
-        elif version > 2:
-            raise UnsupportedDatabaseVersionError(
-                f"Database version {version} is newer than the supported version 2."
-            )
         elif version in (0, 1):
             # Use raw DBAPI connection to handle transactional DDL in SQLite correctly
             # and prevent python sqlite3 auto-committing on ALTER TABLE statements.

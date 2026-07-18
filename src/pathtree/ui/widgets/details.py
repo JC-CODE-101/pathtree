@@ -23,7 +23,7 @@ class NodeDetailsPanel(Static):
             return
 
         name = node.name
-        node_type = node.node_type
+        node_type = node.resource_type if node.resource_type else node.node_kind
         path = node.path if node.path else "N/A"
         description = node.description if node.description else "N/A"
 

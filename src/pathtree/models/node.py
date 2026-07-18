@@ -1,6 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import Column, String
 from sqlmodel import Field, SQLModel
 
 
@@ -22,11 +23,15 @@ class Node(SQLModel, table=True):
         index=True,
     )
     name: str = Field(index=True, nullable=False)
-    node_type: str = Field(
-        default="Folder",
-        index=True,
-        nullable=False,
-    )  # Workspace or Folder (DEPRECATED - do not use in new code)
+    legacy_node_type: str | None = Field(
+        default=None,
+        sa_column=Column(
+            "node_type",
+            String,
+            server_default="Folder",
+            nullable=False,
+        ),
+    )  # Legacy database-only column (DEPRECATED - do not use)
 
     node_kind: str = Field(
         default="resource",
