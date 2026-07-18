@@ -6,14 +6,120 @@ The primary goal of Milestone 0.0.2 is to make PathTree indispensable for everyd
 
 ---
 
-## 1. Scope Authority & Exclusions
+## 1. Architectural Guidelines & Strategy
 
-As defined by `docs/ROADMAP.md` and `docs/NODE_TYPES.md`, this milestone focuses strictly on tree navigation improvements and node management.
+To maintain scalability and enable smooth feature rollouts in subsequent versions, Milestone 0.0.2 implements a clean separation of concerns and documents future architectural placeholders.
 
-### Out of Scope (strictly deferred to Milestone 0.0.3 or later):
-- **Actions** (except for directory-shifting navigation via the standard 0.0.1 shell integration). No customizable launch commands, working directories, or action models.
-- **Node Types**: Commands, Launchers, SSH, Docker, Git, Variables, Plugins.
-- **External Interfaces**: Imports, exports, cloud sync, backups, or custom themes.
+### A. Conceptual Layers: Structural Nodes vs. Resource Types
+Do not model every node as a plain directory. Instead, we introduce a clear architectural distinction between **structural kinds** and **resource types**.
+
+1. **Structural Node Kinds**:
+   - **Workspace**: Conceptual organizational groupings (no execution metadata, acts as a container).
+   - **Folder**: Conceptual visual directory separator/container in the tree view.
+   - **Resource**: An executable or interactive element in the tree which possesses an associated resource type and target action.
+
+2. **Resource Types**:
+   - **Directory** (*Implemented in Milestone 0.0.2*): Represents a filesystem folder.
+   - **File** (*Placeholder only*): Represents a single local filesystem file.
+   - **URL** (*Placeholder only*): Represents an external web address link.
+   - **Application** (*Placeholder only*): Represents an executable system binary.
+   - **Script** (*Placeholder only*): Represents a local script file with an interpreter.
+   - **Shell Environment** (*Placeholder only*): Represents a shell configuration/sourcing environment.
+   - **SSH** (*Placeholder only*): Represents a secure remote terminal bookmark.
+   - *(Future: Command, Docker, Git, Variables...)*
+
+> **Milestone 0.0.2 Scope Limit**: Only the **Directory** resource type is implemented in Milestone 0.0.2. The other resource types are defined and documented as architecture placeholders only; no execution or runtime support is added for them in this release.
+
+### B. Action Resolver Architecture
+Future execution will not depend directly on resource types. Instead, the application will follow a clean, extensible execution pipeline:
+
+```
+Node ──► Resource Type ──► Action Resolver ──► Action Handler ──► Shell Adapter OR Python Launcher
+```
+
+- **Directory** ──► Resolves to `cd` command.
+- **Application** ──► Resolves to executing the system binary.
+- **Script** ──► Resolves to executing script via localized interpreter.
+- **Shell Environment** ──► Resolves to sourcing shell configs.
+- **SSH** ──► Resolves to launching SSH sessions.
+
+Designing Milestone 0.0.2 to support this pipeline ensures that we do not write custom hardcoded execution routines inside UI widgets.
+
+### C. Resource-Specific Creation Dialogs
+The "Add Node" workflow begins by prompting the user to select the conceptual **Resource Type** (or structural Workspace/Folder kind).
+Depending on the selected type, only the relevant configuration fields are displayed:
+
+1. **Directory**:
+   - Name
+   - Path (filesystem directory path)
+   - Description
+2. **URL**:
+   - Name
+   - URL string
+   - Description
+3. **Application**:
+   - Name
+   - Executable path
+   - Arguments
+   - Working directory
+4. **Script**:
+   - Name
+   - Script path
+   - Interpreter (e.g., python, bash)
+   - Arguments
+5. **Shell Environment**:
+   - Name
+   - Target Shell (bash/zsh)
+   - Source file path
+6. **SSH**:
+   - Name
+   - Host
+   - User
+   - Port
+   - Identity file path
+
+### D. Executable Resource Group
+A conceptual group of "Executable Resources" is defined for filtering and execution. This group includes:
+- **Application**
+- **Script**
+- **Shell Environment**
+- **SSH**
+- *(Future: Command)*
+
+### E. Typed Search Filters & Shortcuts
+The search behavior is expanded with typed filters enabling the user to search nodes matching specific criteria:
+- `type:directory` - Filters to directory resources.
+- `type:file` - Filters to file resources.
+- `type:url` - Filters to URL resources.
+- `type:application` - Filters to applications.
+- `type:script` - Filters to scripts.
+- `type:ssh` - Filters to SSH bookmarks.
+
+#### Search Shortcuts Concept:
+We define visual/keyboard query shortcuts that activate specific typed filters:
+- `x` ──► Focuses/Filters to **all** executable resources.
+- `xa` ──► Focuses/Filters to **applications**.
+- `xs` ──► Focuses/Filters to **scripts**.
+- `xe` ──► Focuses/Filters to **shell environments**.
+- `xh` ──► Focuses/Filters to **SSH resources**.
+
+> **Note**: Suffix/shortcut query filtering logic is documented in Milestone 0.0.2 to guide design, but actual implementation of these advanced filters is postponed to Milestone 0.0.3.
+
+### F. Future Interactive Resource Browser
+To avoid forcing the user to manually type out full paths, future versions will offer interactive file and directory pickers inside form dialogs:
+- **Browse Directory...**
+- **Browse File...**
+
+Implementation of this file-system navigation picker is intentionally postponed beyond Milestone 0.0.2.
+
+### G. Shell Adapter Responsibilities
+The separate Bash/Zsh shell adapters have minimized responsibilities. They are strictly restricted to operations that **must** happen inside the active shell context:
+- Changing directories (`cd`)
+- Sourcing environment configurations (`source`)
+- Exporting environment variables (`export`)
+- Establishing shell aliases
+
+All other metadata validations, filesystem checks, and UI rendering are handled strictly inside the Python application.
 
 ---
 
@@ -211,7 +317,9 @@ Milestone 0.0.2 is structured into five sequential, highly focused, and reviewab
 - **Scope**: Core UI operations for node addition, edits, and deletions via clean modals.
 - **Deliverables**:
   - Create reusable, keyboard-first modal/dialog screens in `ui/screens/dialogs.py` for:
-    - **Add Node**: Select Workspace/Folder type, enter name, path, description.
+    - **Add Node**:
+      - Step 1: Resource Type select menu (Workspace, Folder, Directory, File, URL, Application, Script, Shell Environment, SSH).
+      - Step 2: Display input form corresponding strictly to selected resource configuration metadata. For Directory, fields are name, path, and description. Other resource types render placeholders/instructions for future releases.
     - **Edit Node**: Modify metadata, change parent category, toggle favorite/temporary status.
     - **Delete Node**: Standard confirmation prompt preventing accidental loss of bookmarks.
   - Bind key shortcuts (`a`, `e`, `d`, `m`) to pop up corresponding modals in `ui/screens/main.py`.
