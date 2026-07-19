@@ -12,14 +12,17 @@ class NodeDetailsPanel(Static):
         """Initialize the NodeDetailsPanel with default text."""
         super().__init__("No node selected.", **kwargs)
 
-    def update_node(self, node: Node | None) -> None:
+    def update_node(
+        self, node: Node | None, empty_message: str = "No node selected."
+    ) -> None:
         """Update the panel with details of the provided node.
 
         Args:
             node: The Node object to display, or None if no node is selected.
+            empty_message: Custom message to display if node is None.
         """
         if node is None:
-            self.update("No node selected.")
+            self.update(empty_message)
             return
 
         name = node.name
