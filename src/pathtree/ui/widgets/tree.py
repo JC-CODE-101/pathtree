@@ -25,9 +25,28 @@ class NodeTreeView(Tree[uuid.UUID]):
         Binding("right", "expand_node", "Right/Expand", show=False),
         Binding("/", "focus_search", "Search", show=False),
         Binding("s", "focus_search", "Search", show=False),
+        Binding("a", "add_node", "Add Node", show=False),
+        Binding("e", "edit_node", "Edit Node", show=False),
+        Binding("m", "move_node", "Move Node", show=False),
+        Binding("d", "delete_node", "Delete Node", show=False),
+        Binding("delete", "delete_node", "Delete Node", show=False),
     ]
 
     class FocusSearch(Message):
+        """Sent when the search focus key is pressed in the tree."""
+
+    class AddNode(Message):
+        """Sent when the 'a' key is pressed to add a node."""
+
+    class EditNode(Message):
+        """Sent when the 'e' key is pressed to edit a node."""
+
+    class MoveNode(Message):
+        """Sent when the 'm' key is pressed to move a node."""
+
+    class DeleteNode(Message):
+        """Sent when the 'd' or 'delete' key is pressed to delete a node."""
+
         """Sent when the search focus key is pressed in the tree."""
 
     def __init__(self, node_service: NodeService, **kwargs) -> None:
@@ -101,6 +120,22 @@ class NodeTreeView(Tree[uuid.UUID]):
     def action_focus_search(self) -> None:
         """Post FocusSearch message to focus the search input."""
         self.post_message(self.FocusSearch())
+
+    def action_add_node(self) -> None:
+        """Post AddNode message."""
+        self.post_message(self.AddNode())
+
+    def action_edit_node(self) -> None:
+        """Post EditNode message."""
+        self.post_message(self.EditNode())
+
+    def action_move_node(self) -> None:
+        """Post MoveNode message."""
+        self.post_message(self.MoveNode())
+
+    def action_delete_node(self) -> None:
+        """Post DeleteNode message."""
+        self.post_message(self.DeleteNode())
 
     def action_collapse_or_parent(self) -> None:
         """Collapse active directory node or go to parent if already collapsed."""
