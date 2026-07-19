@@ -50,6 +50,8 @@ class MainScreen(Screen[None]):
         self.output_path = output_path
         self._last_query: str = ""
         self._last_selected_node_id: uuid.UUID | None = None
+        self._pre_search_selected_node_id: uuid.UUID | None = None
+        self._db_is_empty: bool = False
 
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""
@@ -65,6 +67,16 @@ class MainScreen(Screen[None]):
         tree = self.query_one("#tree-view", NodeTreeView)
         tree.focus()
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+
+        # Cache whether the database is empty on mount to avoid redundant queries
+        try:
+            root_nodes = self.node_service.load_root_nodes()
+            self._db_is_empty = not root_nodes
+        except NodeServiceError as e:
+            self._db_is_empty = False
+            details_panel.update_error(str(e))
+            return
+
         if tree.load_error:
             details_panel.update_error(tree.load_error)
         else:
@@ -79,9 +91,8 @@ class MainScreen(Screen[None]):
             details_panel.update_error(tree.load_error)
             return
 
-        # Check if DB is empty
-        root_nodes = self.node_service.load_root_nodes()
-        if not root_nodes:
+        # Check if DB is empty from cached state
+        if self._db_is_empty:
             details_panel.update_node(None, empty_message="No nodes yet")
             return
 
@@ -94,7 +105,8 @@ class MainScreen(Screen[None]):
         # Load node details
         node = self.node_service.get_node(cursor_node.data)
         details_panel.update_node(node)
-        self._last_selected_node_id = cursor_node.data
+        if tree.has_focus or self._last_selected_node_id is None:
+            self._last_selected_node_id = cursor_node.data
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[uuid.UUID]) -> None:
         """Update the details panel whenever the highlighted node changes."""
@@ -159,39 +171,38 @@ class MainScreen(Screen[None]):
             details_panel.update_error(str(e))
             return
 
+        is_now_non_empty = bool(query.strip())
+        # Capture pre-search selection if transitioning from empty to non-empty
+        if is_now_non_empty and self._pre_search_selected_node_id is None:
+            self._pre_search_selected_node_id = self._last_selected_node_id
+
+        # Determine which node ID we want to restore/select
+        restore_id = self._last_selected_node_id
+        if not is_now_non_empty and self._pre_search_selected_node_id is not None:
+            restore_id = self._pre_search_selected_node_id
+            self._pre_search_selected_node_id = None
+
         # Load filtered tree, trying to preserve selection if possible
         # Expand all children when query is active
-        expand_all = bool(query.strip())
         tree.load_tree(
             filtered_nodes,
-            selected_node_id=self._last_selected_node_id,
-            expand_all=expand_all,
+            selected_node_id=restore_id,
+            expand_all=is_now_non_empty,
         )
 
         # If no nodes are returned under a query (search returns empty)
         if not filtered_nodes and query.strip():
             # Clear cursor node highlight since there are no visible tree nodes
             tree.move_cursor(None)
-            details_panel.update_node(None, empty_message="No matching nodes")
-        else:
-            self._update_details_and_selection()
+
+        self._update_details_and_selection()
 
     def on_search_input_escape_pressed(self, event: SearchInput.EscapePressed) -> None:
         """Clear query, restore full tree, and return focus to NodeTreeView."""
         search_input = self.query_one("#search-input", SearchInput)
         search_input.value = ""
-        self._last_query = ""
-
         tree = self.query_one("#tree-view", NodeTreeView)
-        try:
-            full_nodes = self.node_service.get_validated_tree()
-            tree.load_tree(full_nodes, selected_node_id=self._last_selected_node_id)
-        except NodeServiceError as e:
-            details_panel = self.query_one("#details-panel", NodeDetailsPanel)
-            details_panel.update_error(str(e))
-
         tree.focus()
-        self._update_details_and_selection()
 
     def on_search_input_down_pressed(self, event: SearchInput.DownPressed) -> None:
         """Move focus to NodeTreeView."""

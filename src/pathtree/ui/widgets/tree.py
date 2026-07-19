@@ -85,9 +85,9 @@ class NodeTreeView(Tree[uuid.UUID]):
             while curr is not None and curr != self.root:
                 curr.expand()
                 curr = curr.parent
-            self.move_cursor(target_node)
+            self.call_after_refresh(self.move_cursor, target_node)
         elif not self.show_root and self.root.children:
-            self.move_cursor(self.root.children[0])
+            self.call_after_refresh(self.move_cursor, self.root.children[0])
 
     def populate_tree(self) -> None:
         """Populate branches from service-provided nodes recursively."""

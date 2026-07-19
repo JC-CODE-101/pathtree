@@ -417,3 +417,113 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         await pilot.press("escape")
         assert len(tree.root.children) == 1
         assert "Active developer workspace" in details.render().plain
+
+
+@pytest.mark.asyncio
+async def test_pre_search_selection_restored(session: Session) -> None:
+    """Test that Escape restores the selection that existed before search started."""
+    repo = NodeRepository(session)
+    node_a = repo.create(Node(name="Apple Node", sort_order=1))
+    node_b = repo.create(Node(name="Banana Node", sort_order=2))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Select node B (Banana Node)
+        await pilot.press("j")
+        assert tree.cursor_node is not None
+        assert str(tree.cursor_node.label) == "Banana Node"
+        assert tree.cursor_node.data == node_b.id
+
+        # Focus search and query so only node A matches (Apple)
+        await pilot.press("/")
+        for char in "apple":
+            await pilot.press(char)
+        await pilot.pause(0.01)
+
+        # Node A should be the visible fallback selection because B is hidden
+        assert len(tree.root.children) == 1
+        assert str(tree.cursor_node.label) == "Apple Node"
+        assert tree.cursor_node.data == node_a.id
+
+        # Escape search
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+
+        # Node B (Banana Node) should be restored as selected
+        assert len(tree.root.children) == 2
+        assert str(tree.cursor_node.label) == "Banana Node"
+        assert tree.cursor_node.data == node_b.id
+
+
+@pytest.mark.asyncio
+async def test_selection_preserved_when_visible(session: Session) -> None:
+    """Test that a selected node remains selected when it still matches search."""
+    repo = NodeRepository(session)
+    node_a = repo.create(Node(name="Apple Core", sort_order=1))
+    repo.create(Node(name="Banana Peel", sort_order=2))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Select node A (Apple Core)
+        assert tree.cursor_node is not None
+        assert str(tree.cursor_node.label) == "Apple Core"
+        assert tree.cursor_node.data == node_a.id
+
+        # Focus search and query for "apple"
+        await pilot.press("/")
+        for char in "apple":
+            await pilot.press(char)
+        await pilot.pause(0.01)
+
+        # Apple Core is still visible and matches, so selection must be preserved
+        assert len(tree.root.children) == 1
+        assert str(tree.cursor_node.label) == "Apple Core"
+        assert tree.cursor_node.data == node_a.id
+
+
+@pytest.mark.asyncio
+async def test_empty_database_search_state(session: Session) -> None:
+    """Test empty database shows 'No nodes yet' even during non-empty search."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+        details = app.screen.query_one("#details-panel")
+
+        # Verify initial empty-database state
+        assert len(tree.root.children) == 0
+        assert "No nodes yet" in details.render().plain
+
+        # Focus search and type a query
+        await pilot.press("/")
+        for char in "workspace":
+            await pilot.press(char)
+        await pilot.pause(0.01)
+
+        # Verify tree remains empty and details still shows "No nodes yet"
+        assert len(tree.root.children) == 0
+        assert "No nodes yet" in details.render().plain
+
+        # Press Escape and verify same state remains
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert len(tree.root.children) == 0
+        assert "No nodes yet" in details.render().plain
