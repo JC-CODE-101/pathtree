@@ -8,6 +8,25 @@ from textual.widgets import Button, Label, Select, Static
 from pathtree.services.node_service import NodeService, NodeServiceError
 
 
+def resolve_parent_id(value) -> uuid.UUID | None:
+    """Compatibility helper to resolve parent values.
+
+    Maps both Select.BLANK and Select.NULL blank sentinels explicitly to None,
+    maintains valid UUID parent values intact, and does not rely on truthiness.
+    """
+    from textual.widgets import Select
+
+    if value is None:
+        return None
+    if value is Select.BLANK:
+        return None
+    if value is Select.NULL:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    return None
+
+
 class MoveNodeDialog(ModalScreen[bool]):
     """Dialog for moving a node to a different parent."""
 
@@ -115,7 +134,7 @@ class MoveNodeDialog(ModalScreen[bool]):
         status_area.update("")
 
         parent_val = self.query_one("#select-parent", Select).value
-        new_parent_id = parent_val if isinstance(parent_val, uuid.UUID) else None
+        new_parent_id = resolve_parent_id(parent_val)
 
         try:
             self.node_service.move_node(self.node_id, new_parent_id)

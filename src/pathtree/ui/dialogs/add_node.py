@@ -17,6 +17,26 @@ from textual.widgets import (
 
 from pathtree.services.node_service import NodeService, NodeServiceError
 
+# Compatibility sentinel for different Textual versions
+_BLANK_SENTINEL = Select.BLANK if Select.BLANK is not False else Select.NULL
+
+
+def resolve_parent_id(value) -> uuid.UUID | None:
+    """Compatibility helper to resolve parent values.
+
+    Maps both Select.BLANK and Select.NULL blank sentinels explicitly to None,
+    maintains valid UUID parent values intact, and does not rely on truthiness.
+    """
+    if value is None:
+        return None
+    if value is Select.BLANK:
+        return None
+    if value is Select.NULL:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    return None
+
 
 class AddNodeDialog(ModalScreen[uuid.UUID | None]):
     """Dialog for creating a new node (Workspace, Folder, or Directory)."""
@@ -119,7 +139,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 yield Label("Icon", classes="field-label")
                 yield Input(placeholder="Enter icon (optional)...", id="input-icon")
 
-            with Vertical(classes="field-container"):
+            with Vertical(classes="field-container", id="parent-field-container"):
                 yield Label("Parent", classes="field-label")
                 yield Select(
                     parent_choices,
@@ -144,25 +164,50 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         # because Workspace is selected
         self.query_one("#checkbox-temporary", Checkbox).display = False
         self.query_one("#path-field-container", Vertical).display = False
+        self.query_one("#parent-field-container", Vertical).display = False
+        # Discard default parent if it is workspace (which must have None)
+        select_parent = self.query_one("#select-parent", Select)
+        select_parent.disabled = True
+        select_parent.value = _BLANK_SENTINEL
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         # Update visibility of fields based on chosen type
         radio_id = event.pressed.id
         path_container = self.query_one("#path-field-container", Vertical)
         temp_checkbox = self.query_one("#checkbox-temporary", Checkbox)
+        parent_container = self.query_one("#parent-field-container", Vertical)
+        select_parent = self.query_one("#select-parent", Select)
 
         if radio_id == "radio-workspace":
             self.selected_type = "workspace"
             path_container.display = False
             temp_checkbox.display = False
-        elif radio_id == "radio-folder":
-            self.selected_type = "folder"
-            path_container.display = False
-            temp_checkbox.display = False
-        elif radio_id == "radio-directory":
-            self.selected_type = "directory"
-            path_container.display = True
-            temp_checkbox.display = True
+            parent_container.display = False
+            select_parent.disabled = True
+            select_parent.value = _BLANK_SENTINEL
+        elif radio_id == "radio-folder" or radio_id == "radio-directory":
+            self.selected_type = "folder" if radio_id == "radio-folder" else "directory"
+            path_container.display = radio_id == "radio-directory"
+            temp_checkbox.display = radio_id == "radio-directory"
+            parent_container.display = True
+            select_parent.disabled = False
+            # Restore valid parent options (Workspace/Folder).
+            # Choices are already in Select, but let's check if
+            # default_parent_id is valid for this type.
+            # Workspaces and Folders are valid parent choices.
+            valid = False
+            if self.default_parent_id is not None:
+                parent_node = self.node_service.get_node(self.default_parent_id)
+                if parent_node is not None and parent_node.node_kind in (
+                    "workspace",
+                    "folder",
+                ):
+                    valid = True
+
+            if valid:
+                select_parent.value = self.default_parent_id
+            else:
+                select_parent.value = _BLANK_SENTINEL
 
     def on_input_changed(self, event: Input.Changed) -> None:
         # We handle real-time path validation warning for Directory path
@@ -191,7 +236,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         icon = self.query_one("#input-icon", Input).value or None
 
         parent_val = self.query_one("#select-parent", Select).value
-        parent_id = parent_val if isinstance(parent_val, uuid.UUID) else None
+        parent_id = resolve_parent_id(parent_val)
 
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
