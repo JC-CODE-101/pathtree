@@ -25,4 +25,4 @@ class PathTreeApp(App[None]):
 
     def action_quit(self) -> None:
         """Quit the application safely with exit code 0."""
-        self.exit(code=0)
+        self.exit(return_code=0)

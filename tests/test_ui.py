@@ -194,6 +194,26 @@ async def test_q_exits_safely(session: Session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_ctrl_q_exits_safely(session: Session) -> None:
+    """Test that pressing ctrl+q exits the application safely and cleanly."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        # Wait for main screen to load
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        await pilot.press("ctrl+q")
+
+        # Wait for app to exit
+        while app.return_code is None:
+            await pilot.pause(0.01)
+
+        assert app.return_code == 0
+
+
+@pytest.mark.asyncio
 async def test_cyclic_database_handled_gracefully(session: Session) -> None:
     """Test that database cycle error is handled gracefully on startup."""
     repo = NodeRepository(session)
