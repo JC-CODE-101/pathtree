@@ -1,8 +1,10 @@
 import uuid
 from collections.abc import Sequence
 
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlmodel import Session, select
 
+from pathtree.database.errors import RepositoryError, RepositoryIntegrityError
 from pathtree.models.node import Node
 
 
@@ -47,11 +49,14 @@ class NodeRepository:
             self.session.commit()
             self.session.refresh(node)
             return node
-        except Exception as e:
+        except IntegrityError as e:
             self.session.rollback()
-            from pathtree.services.node_service import ValidationError
-
-            raise ValidationError(f"Database persistence failed: {e}") from e
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
 
     def get_by_id(self, id: uuid.UUID) -> Node | None:
         """Retrieve a Node by its UUID.
@@ -107,11 +112,14 @@ class NodeRepository:
             self.session.commit()
             self.session.refresh(node)
             return node
-        except Exception as e:
+        except IntegrityError as e:
             self.session.rollback()
-            from pathtree.services.node_service import ValidationError
-
-            raise ValidationError(f"Database update failed: {e}") from e
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
 
     def delete(self, id: uuid.UUID) -> bool:
         """Delete a Node by its UUID.
@@ -124,9 +132,18 @@ class NodeRepository:
         """
         node = self.get_by_id(id)
         if node:
-            self.session.delete(node)
-            self.session.commit()
-            return True
+            try:
+                self.session.delete(node)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
         return False
 
     def get_descendants(self, node_id: uuid.UUID) -> list[Node]:
@@ -165,9 +182,14 @@ class NodeRepository:
                 self.session.flush()
             self.session.commit()
             return len(descendants)
-        except Exception:
+        except IntegrityError as e:
             self.session.rollback()
-            raise
+            raise RepositoryIntegrityError(
+                f"Database recursive deletion violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database recursive deletion failed: {e}") from e
 
     def has_sibling_with_name(
         self,

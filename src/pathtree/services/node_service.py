@@ -2,8 +2,17 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
+from pathtree.database.errors import RepositoryError, RepositoryIntegrityError
 from pathtree.database.repository import NodeRepository
 from pathtree.models.node import Node
+
+
+def clean_error_message(err: Exception) -> str:
+    """Extract a clean database error message without raw SQL details."""
+    msg = str(err)
+    if "[SQL:" in msg:
+        msg = msg.split("[SQL:")[0].strip()
+    return msg
 
 
 class NodeServiceError(Exception):
@@ -358,7 +367,16 @@ class NodeService:
         )
 
         self.validate_node(node)
-        return self.repository.create(node)
+        try:
+            return self.repository.create(node)
+        except RepositoryIntegrityError as e:
+            raise ValidationError(
+                f"Database persistence violated integrity: {clean_error_message(e)}"
+            ) from e
+        except RepositoryError as e:
+            raise ValidationError(
+                f"Database persistence failed: {clean_error_message(e)}"
+            ) from e
 
     def update_node(self, node_id: uuid.UUID, **kwargs) -> Node:
         """Update an existing node after performing validations.
@@ -481,7 +499,16 @@ class NodeService:
         node.is_favorite = proposed_is_favorite
         node.is_temporary = proposed_is_temporary
 
-        return self.repository.update(node)
+        try:
+            return self.repository.update(node)
+        except RepositoryIntegrityError as e:
+            raise ValidationError(
+                f"Database update violated integrity: {clean_error_message(e)}"
+            ) from e
+        except RepositoryError as e:
+            raise ValidationError(
+                f"Database update failed: {clean_error_message(e)}"
+            ) from e
 
     def move_node(self, node_id: uuid.UUID, new_parent_id: uuid.UUID | None) -> Node:
         """Move a node to a new parent atomically.
@@ -511,7 +538,16 @@ class NodeService:
             )
 
         node.parent_id = new_parent_id
-        return self.repository.update(node)
+        try:
+            return self.repository.update(node)
+        except RepositoryIntegrityError as e:
+            raise ValidationError(
+                f"Database move violated integrity: {clean_error_message(e)}"
+            ) from e
+        except RepositoryError as e:
+            raise ValidationError(
+                f"Database move failed: {clean_error_message(e)}"
+            ) from e
 
     def count_descendants(self, node_id: uuid.UUID) -> int:
         """Count all descendants of a given node.
@@ -552,6 +588,14 @@ class NodeService:
             self.repository.delete_recursive(node_id)
         except RepositoryCycleError as e:
             raise CycleError(str(e)) from e
+        except RepositoryIntegrityError as e:
+            raise ValidationError(
+                f"Database deletion violated integrity: {clean_error_message(e)}"
+            ) from e
+        except RepositoryError as e:
+            raise NodeServiceError(
+                f"Database deletion failed: {clean_error_message(e)}"
+            ) from e
         return True
 
     def get_parent_choices(

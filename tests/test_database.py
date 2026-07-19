@@ -282,7 +282,7 @@ def test_updated_at_increases_on_update(session):
 
 def test_repository_transaction_safety_and_rollback(session):
     """Verify failed create/update operations rollback and keep session usable."""
-    from pathtree.services.node_service import ValidationError
+    from pathtree.database.errors import RepositoryIntegrityError
 
     repo = NodeRepository(session)
 
@@ -292,9 +292,9 @@ def test_repository_transaction_safety_and_rollback(session):
 
     # 2. Force an IntegrityError during create (duplicate UUID)
     node_dup = Node(id=node1.id, name="Node Duplicate", node_kind="folder")
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(RepositoryIntegrityError) as excinfo:
         repo.create(node_dup)
-    assert "Database persistence failed" in str(excinfo.value)
+    assert "Database persistence violated integrity" in str(excinfo.value)
 
     # 3. Verify session remains usable by inserting a new valid node
     node2 = repo.create(Node(name="Node 2", node_kind="folder"))
@@ -304,9 +304,9 @@ def test_repository_transaction_safety_and_rollback(session):
     # 4. Force an IntegrityError during update (violating NOT NULL name constraint)
     # SQLite does not allow null name
     node2.name = None
-    with pytest.raises(ValidationError) as excinfo:
+    with pytest.raises(RepositoryIntegrityError) as excinfo:
         repo.update(node2)
-    assert "Database update failed" in str(excinfo.value)
+    assert "Database update violated integrity" in str(excinfo.value)
 
     # 5. Restore node2 name and verify update succeeds to prove session is still usable
     node2.name = "Node 2 Restored"

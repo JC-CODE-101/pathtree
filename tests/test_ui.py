@@ -947,3 +947,47 @@ async def test_add_node_dialog_migrated_db_regression(tmp_path: Path) -> None:
         assert res.legacy_node_type == "Folder"
 
     engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_add_node_dialog_persistence_failure_display(session: Session) -> None:
+    """Verify AddNodeDialog displays a persistence failure cleanly without crash."""
+    from unittest import mock
+
+    from pathtree.services.node_service import ValidationError
+
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Trigger dialog
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+
+        # Type a name
+        dialog.query_one("#input-name").value = "Will Fail Node"
+
+        # Mock node_service.create_node to raise ValidationError
+        with mock.patch.object(
+            node_service,
+            "create_node",
+            side_effect=ValidationError(
+                "Database persistence violated integrity: simulated constraints failed"
+            ),
+        ):
+            dialog.action_submit()
+            await pilot.pause(0.01)
+
+            # Dialog must remain open (not dismissed)
+            assert isinstance(app.screen, AddNodeDialog)
+
+            # Error message must be displayed in the status-area
+            status_area = dialog.query_one("#status-area")
+            assert "simulated constraints failed" in status_area.render().plain
+
+            # App didn't crash and no traceback screen is pushed
+            assert app.screen == dialog
