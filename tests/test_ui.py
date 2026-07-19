@@ -842,3 +842,108 @@ async def test_delete_escape_cancellation(session: Session) -> None:
 
         assert app.screen.id == "main-screen"
         assert node_service.get_node(ws.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_add_node_dialog_migrated_db_regression(tmp_path: Path) -> None:
+    """Async UI regression test using a migrated legacy database.
+
+    Verifies:
+    - open AddNodeDialog;
+    - create a Workspace;
+    - verify the dialog closes cleanly;
+    - verify the node appears in the tree;
+    - verify no traceback screen appears;
+    - cover Folder and Directory creation through the service on this database.
+    """
+    import sqlite3
+
+    from pathtree.database.connection import create_db_engine, init_db
+
+    db_file = tmp_path / "legacy_ui_regression.db"
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    # Create legacy v1 schema (NOT NULL node_type, no default)
+    cursor.execute("""
+    CREATE TABLE nodes (
+        id CHAR(32) NOT NULL,
+        parent_id CHAR(32),
+        name VARCHAR NOT NULL,
+        node_type VARCHAR NOT NULL,
+        description VARCHAR,
+        icon VARCHAR,
+        path VARCHAR,
+        sort_order INTEGER NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (id),
+        FOREIGN KEY(parent_id) REFERENCES nodes (id)
+    );
+    """)
+    cursor.execute("PRAGMA user_version = 1;")
+    conn.commit()
+    conn.close()
+
+    # Run v2 migration
+    engine = create_db_engine(db_file)
+    init_db(engine)
+
+    with Session(engine) as session:
+        repo = NodeRepository(session)
+        node_service = NodeService(repo)
+
+        app = PathTreeApp(node_service=node_service)
+        async with app.run_test() as pilot:
+            while app.screen.id != "main-screen":
+                await pilot.pause(0.01)
+            await pilot.pause(0.01)
+
+            # 1. Trigger Add Node Dialog
+            await pilot.press("a")
+            assert isinstance(app.screen, AddNodeDialog)
+            dialog = app.screen
+
+            # 2. Enter workspace name
+            dialog.query_one("#input-name").value = "Migrated Workspace"
+
+            # 3. Submit/Create (this will insert and verify NO IntegrityError is raised)
+            dialog.action_submit()
+            await pilot.pause(0.01)
+
+            # 4. Verify the dialog closes cleanly
+            assert app.screen.id == "main-screen"
+
+            # 5. Verify the node appears in the tree
+            tree = app.screen.query_one("#tree-view")
+            assert len(tree.root.children) == 1
+            assert str(tree.root.children[0].label) == "Migrated Workspace"
+
+            # 6. Verify no traceback screen appears (app is still on main-screen)
+            assert app.screen.id == "main-screen"
+
+        # 7. Also cover Folder and Directory creation via service on migrated db
+        ws_node = node_service.load_root_nodes()[0]
+        assert ws_node.name == "Migrated Workspace"
+
+        # - Create Folder
+        folder = node_service.create_node(
+            name="Service Folder", node_kind="folder", parent_id=ws_node.id
+        )
+        assert folder.id is not None
+        assert folder.node_kind == "folder"
+        assert folder.legacy_node_type == "Folder"
+
+        # - Create Directory Resource
+        res = node_service.create_node(
+            name="Service Directory",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=folder.id,
+            path="/tmp/migrated-service-dir",
+        )
+        assert res.id is not None
+        assert res.node_kind == "resource"
+        assert res.resource_type == "directory"
+        assert res.legacy_node_type == "Folder"
+
+    engine.dispose()

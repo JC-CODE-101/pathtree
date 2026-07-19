@@ -21,6 +21,17 @@ class NodeRepository:
         """Initialize the repository with a database session."""
         self.session = session
 
+    def _set_legacy_node_type(self, node: Node) -> None:
+        """Map canonical types to legacy_node_type for DB compatibility."""
+        if node.node_kind == "workspace":
+            node.legacy_node_type = "Workspace"
+        elif node.node_kind == "folder":
+            node.legacy_node_type = "Folder"
+        elif node.node_kind == "resource" and node.resource_type == "directory":
+            node.legacy_node_type = "Folder"
+        else:
+            node.legacy_node_type = "Folder"
+
     def create(self, node: Node) -> Node:
         """Create a new Node in the database.
 
@@ -30,10 +41,17 @@ class NodeRepository:
         Returns:
             The persisted Node object.
         """
-        self.session.add(node)
-        self.session.commit()
-        self.session.refresh(node)
-        return node
+        self._set_legacy_node_type(node)
+        try:
+            self.session.add(node)
+            self.session.commit()
+            self.session.refresh(node)
+            return node
+        except Exception as e:
+            self.session.rollback()
+            from pathtree.services.node_service import ValidationError
+
+            raise ValidationError(f"Database persistence failed: {e}") from e
 
     def get_by_id(self, id: uuid.UUID) -> Node | None:
         """Retrieve a Node by its UUID.
@@ -83,10 +101,17 @@ class NodeRepository:
         from datetime import UTC, datetime
 
         node.updated_at = datetime.now(UTC)
-        self.session.add(node)
-        self.session.commit()
-        self.session.refresh(node)
-        return node
+        self._set_legacy_node_type(node)
+        try:
+            self.session.add(node)
+            self.session.commit()
+            self.session.refresh(node)
+            return node
+        except Exception as e:
+            self.session.rollback()
+            from pathtree.services.node_service import ValidationError
+
+            raise ValidationError(f"Database update failed: {e}") from e
 
     def delete(self, id: uuid.UUID) -> bool:
         """Delete a Node by its UUID.
