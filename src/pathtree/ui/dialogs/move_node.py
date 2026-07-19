@@ -6,25 +6,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Select, Static
 
 from pathtree.services.node_service import NodeService, NodeServiceError
-
-
-def resolve_parent_id(value) -> uuid.UUID | None:
-    """Compatibility helper to resolve parent values.
-
-    Maps both Select.BLANK and Select.NULL blank sentinels explicitly to None,
-    maintains valid UUID parent values intact, and does not rely on truthiness.
-    """
-    from textual.widgets import Select
-
-    if value is None:
-        return None
-    if value is Select.BLANK:
-        return None
-    if value is Select.NULL:
-        return None
-    if isinstance(value, uuid.UUID):
-        return value
-    return None
+from pathtree.ui.compat import resolve_optional_uuid
 
 
 class MoveNodeDialog(ModalScreen[bool]):
@@ -88,9 +70,24 @@ class MoveNodeDialog(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         # Generate parent choices excluding self and descendants
-        parent_choices = self.node_service.get_parent_choices(
-            exclude_node_id=self.node_id
-        )
+        raw_choices = self.node_service.get_parent_choices(exclude_node_id=self.node_id)
+
+        parent_choices = []
+        if self.node.node_kind == "workspace":
+            # Workspace can only move to Root (parent_id = None)
+            for label, val_id in raw_choices:
+                if val_id is None:
+                    parent_choices.append((label, val_id))
+        else:
+            # Folder and Directory: Workspace/Folder only, Root excluded
+            for label, val_id in raw_choices:
+                if val_id is not None:
+                    parent_node = self.node_service.get_node(val_id)
+                    if parent_node is not None and parent_node.node_kind in (
+                        "workspace",
+                        "folder",
+                    ):
+                        parent_choices.append((label, val_id))
 
         # Look up current parent label if exists
         current_parent_label = "Root"
@@ -134,7 +131,7 @@ class MoveNodeDialog(ModalScreen[bool]):
         status_area.update("")
 
         parent_val = self.query_one("#select-parent", Select).value
-        new_parent_id = resolve_parent_id(parent_val)
+        new_parent_id = resolve_optional_uuid(parent_val)
 
         try:
             self.node_service.move_node(self.node_id, new_parent_id)

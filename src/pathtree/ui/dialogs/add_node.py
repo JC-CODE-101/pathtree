@@ -16,26 +16,7 @@ from textual.widgets import (
 )
 
 from pathtree.services.node_service import NodeService, NodeServiceError
-
-# Compatibility sentinel for different Textual versions
-_BLANK_SENTINEL = Select.BLANK if Select.BLANK is not False else Select.NULL
-
-
-def resolve_parent_id(value) -> uuid.UUID | None:
-    """Compatibility helper to resolve parent values.
-
-    Maps both Select.BLANK and Select.NULL blank sentinels explicitly to None,
-    maintains valid UUID parent values intact, and does not rely on truthiness.
-    """
-    if value is None:
-        return None
-    if value is Select.BLANK:
-        return None
-    if value is Select.NULL:
-        return None
-    if isinstance(value, uuid.UUID):
-        return value
-    return None
+from pathtree.ui.compat import _BLANK_SENTINEL, resolve_optional_uuid
 
 
 class AddNodeDialog(ModalScreen[uuid.UUID | None]):
@@ -160,54 +141,83 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 yield Button("Create", variant="primary", id="btn-create")
 
     def on_mount(self) -> None:
-        # Hide temporary checkbox and path input by default
-        # because Workspace is selected
-        self.query_one("#checkbox-temporary", Checkbox).display = False
-        self.query_one("#path-field-container", Vertical).display = False
-        self.query_one("#parent-field-container", Vertical).display = False
-        # Discard default parent if it is workspace (which must have None)
-        select_parent = self.query_one("#select-parent", Select)
-        select_parent.disabled = True
-        select_parent.value = _BLANK_SENTINEL
+        self.update_parent_choices()
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        # Update visibility of fields based on chosen type
         radio_id = event.pressed.id
+        if radio_id == "radio-workspace":
+            self.selected_type = "workspace"
+        elif radio_id == "radio-folder":
+            self.selected_type = "folder"
+        elif radio_id == "radio-directory":
+            self.selected_type = "directory"
+        self.update_parent_choices()
+
+    def update_parent_choices(self) -> None:
+        """Update parent choices in the select dropdown based on chosen type."""
         path_container = self.query_one("#path-field-container", Vertical)
         temp_checkbox = self.query_one("#checkbox-temporary", Checkbox)
         parent_container = self.query_one("#parent-field-container", Vertical)
         select_parent = self.query_one("#select-parent", Select)
+        warning_area = self.query_one("#warning-area", Static)
 
-        if radio_id == "radio-workspace":
-            self.selected_type = "workspace"
+        if self.selected_type == "workspace":
             path_container.display = False
             temp_checkbox.display = False
             parent_container.display = False
             select_parent.disabled = True
             select_parent.value = _BLANK_SENTINEL
-        elif radio_id == "radio-folder" or radio_id == "radio-directory":
-            self.selected_type = "folder" if radio_id == "radio-folder" else "directory"
-            path_container.display = radio_id == "radio-directory"
-            temp_checkbox.display = radio_id == "radio-directory"
-            parent_container.display = True
-            select_parent.disabled = False
-            # Restore valid parent options (Workspace/Folder).
-            # Choices are already in Select, but let's check if
-            # default_parent_id is valid for this type.
-            # Workspaces and Folders are valid parent choices.
-            valid = False
-            if self.default_parent_id is not None:
-                parent_node = self.node_service.get_node(self.default_parent_id)
+            warning_area.update("")
+            return
+
+        # Folder or Directory:
+        path_container.display = self.selected_type == "directory"
+        temp_checkbox.display = self.selected_type == "directory"
+        parent_container.display = True
+        select_parent.disabled = False
+
+        # Retrieve all parent choices from node service
+        all_choices = self.node_service.get_parent_choices()
+        # Filter choices: only Workspace and Folder nodes (excluding Root,
+        # i.e. None value, and Directory resources)
+        valid_choices = []
+        for label, val_id in all_choices:
+            if val_id is not None:
+                parent_node = self.node_service.get_node(val_id)
                 if parent_node is not None and parent_node.node_kind in (
                     "workspace",
                     "folder",
                 ):
-                    valid = True
+                    valid_choices.append((label, val_id))
 
-            if valid:
-                select_parent.value = self.default_parent_id
+        select_parent.set_options(valid_choices)
+
+        # Derives the default parent only when valid for chosen type
+        valid = False
+        if self.default_parent_id is not None:
+            parent_node = self.node_service.get_node(self.default_parent_id)
+            if parent_node is not None and parent_node.node_kind in (
+                "workspace",
+                "folder",
+            ):
+                valid = True
+
+        if valid:
+            select_parent.value = self.default_parent_id
+        else:
+            if valid_choices:
+                select_parent.value = valid_choices[0][1]
             else:
                 select_parent.value = _BLANK_SENTINEL
+
+        # If no valid parent workspaces/folders are available, show clear message
+        if not valid_choices:
+            warning_area.update(
+                f"No valid parent Workspaces or Folders available to create a "
+                f"{self.selected_type.capitalize()}. Please create a Workspace first."
+            )
+        else:
+            warning_area.update("")
 
     def on_input_changed(self, event: Input.Changed) -> None:
         # We handle real-time path validation warning for Directory path
@@ -236,7 +246,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         icon = self.query_one("#input-icon", Input).value or None
 
         parent_val = self.query_one("#select-parent", Select).value
-        parent_id = resolve_parent_id(parent_val)
+        parent_id = resolve_optional_uuid(parent_val)
 
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
@@ -245,12 +255,19 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             resource_type = None
             path = None
             is_temporary = False
+            parent_id = None  # Always force Workspace to be at root (None)
         elif self.selected_type == "folder":
+            if parent_id is None:
+                status_area.update("A valid parent Workspace or Folder is required.")
+                return
             node_kind = "folder"
             resource_type = None
             path = None
             is_temporary = False
         else:  # directory
+            if parent_id is None:
+                status_area.update("A valid parent Workspace or Folder is required.")
+                return
             node_kind = "resource"
             resource_type = "directory"
             path = self.query_one("#input-path", Input).value or None

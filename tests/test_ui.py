@@ -700,12 +700,12 @@ async def test_move_node_parent_selection_rejection_and_success(
         assert isinstance(app.screen, MoveNodeDialog)
         dialog = app.screen
 
-        # Choices should include Root and Workspace nodes, excluding resources
+        # Choices should include Workspace nodes, excluding Root and resources
         select_widget = dialog.query_one("#select-parent")
         choices = select_widget._options
         # choices are internally represented as tuples: (label, value) or blank
         choice_labels = [str(c[0]) if isinstance(c, tuple) else str(c) for c in choices]
-        assert "Root" in choice_labels
+        assert "Root" not in choice_labels
         assert "Workspace One" in choice_labels
         assert "Workspace Two" in choice_labels
         assert "My Resource" not in choice_labels
@@ -1091,6 +1091,161 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+def test_sentinel_compatibility_scenarios(monkeypatch) -> None:
+    """Verify resolve_optional_uuid with simulated configurations."""
+    import pathtree.ui.compat as compat
+
+    missing = compat._MISSING
+    test_uuid = uuid.uuid4()
+
+    dummy_blank = object()
+    dummy_null = object()
+
+    # Scenario 1: Both BLANK and NULL available
+    monkeypatch.setattr(compat, "SELECT_BLANK", dummy_blank)
+    monkeypatch.setattr(compat, "SELECT_NULL", dummy_null)
+    assert compat.resolve_optional_uuid(dummy_blank) is None
+    assert compat.resolve_optional_uuid(dummy_null) is None
+    assert compat.resolve_optional_uuid(test_uuid) == test_uuid
+    assert compat.resolve_optional_uuid(None) is None
+    assert compat.resolve_optional_uuid("unknown") is None
+
+    # Scenario 2: Only NULL available
+    monkeypatch.setattr(compat, "SELECT_BLANK", missing)
+    monkeypatch.setattr(compat, "SELECT_NULL", dummy_null)
+    assert compat.resolve_optional_uuid(dummy_blank) is None  # falls through
+    assert compat.resolve_optional_uuid(dummy_null) is None
+    assert compat.resolve_optional_uuid(test_uuid) == test_uuid
+
+    # Scenario 3: Only BLANK available
+    monkeypatch.setattr(compat, "SELECT_BLANK", dummy_blank)
+    monkeypatch.setattr(compat, "SELECT_NULL", missing)
+    assert compat.resolve_optional_uuid(dummy_blank) is None
+    assert compat.resolve_optional_uuid(dummy_null) is None  # falls through
+    assert compat.resolve_optional_uuid(test_uuid) == test_uuid
+
+
+@pytest.mark.asyncio
+async def test_expansion_state_preservation_detailed(session: Session) -> None:
+    """Verify detailed tree expansion state preservation."""
+    repo = NodeRepository(session)
+    # Duplicate labels "Coding" in different branches to verify restore by UUID
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+    coding1 = repo.create(Node(name="Coding", node_kind="folder", parent_id=ws1.id))
+    repo.create(Node(name="Python1", node_kind="folder", parent_id=coding1.id))
+    # OtherFolder under WS1 to ensure WS1 remains non-empty after Coding is moved
+    repo.create(Node(name="OtherFolder", node_kind="folder", parent_id=ws1.id))
+
+    ws2 = repo.create(Node(name="WS2", node_kind="workspace", sort_order=2))
+    coding2 = repo.create(Node(name="Coding", node_kind="folder", parent_id=ws2.id))
+    repo.create(Node(name="Python2", node_kind="folder", parent_id=coding2.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Expand WS1 -> Coding, leaving WS2 -> Coding collapsed
+        # Find WS1 node in tree
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        tree.move_cursor(ws1_tn)
+        await pilot.pause(0.01)
+        await pilot.press("l")  # Expand WS1
+        await pilot.press("j")  # Move to first Coding
+        await pilot.press("l")  # Expand Coding 1
+        await pilot.pause(0.01)
+
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        coding1_tn = ws1_tn.children[0]
+        assert ws1_tn.is_expanded is True
+        assert coding1_tn.is_expanded is True
+
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        assert ws2_tn.is_expanded is False
+
+        # --- 1. Expanded branches remain expanded after Edit ---
+        await pilot.press("e")  # Edit Coding 1
+        dialog = app.screen
+        dialog.query_one("#input-name").value = "Coding Edited"
+        dialog.action_submit()
+        await pilot.pause(0.01)
+
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        coding1_tn = ws1_tn.children[0]
+        assert ws1_tn.is_expanded is True
+        assert coding1_tn.is_expanded is True
+        assert str(coding1_tn.label) == "Coding Edited"
+
+        # --- 2. Expanded unrelated Workspace remains expanded after Move ---
+        # WS2 (collapsed) will be moved or ws1 (expanded) remains expanded
+        # Let's add a folder to WS2, expand WS2, then move coding1 to WS2
+        # WS1 remains expanded
+        node_service.move_node(coding1.id, ws2.id)
+        app.screen.refresh_tree(selected_node_id=coding1.id)
+        await pilot.pause(0.01)
+
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        assert ws1_tn.is_expanded is True  # WS1 remains expanded
+
+        # --- 3. Expanded parent remains expanded after deleting a child ---
+        # Expand WS2
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        tree.move_cursor(ws2_tn)
+        await pilot.pause(0.01)
+        await pilot.press("l")  # Expand WS2
+        await pilot.pause(0.01)
+
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        assert ws2_tn.is_expanded is True
+
+        # Delete one of WS2's children
+        child_to_delete = ws2_tn.children[1]  # coding2
+        node_service.delete_node(child_to_delete.data, recursive=True)
+        app.screen.refresh_tree()
+        await pilot.pause(0.01)
+
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        assert (
+            ws2_tn.is_expanded is True
+        )  # Parent WS2 remains expanded after deleting a child
+
+
+@pytest.mark.asyncio
+async def test_search_mutation_query_preservation(session: Session) -> None:
+    """Verify mutation during active search preserves the query."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Workspace Node", node_kind="workspace"))
+    folder = repo.create(Node(name="Target Node", node_kind="folder", parent_id=ws.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Start search matching 'Target'
+        await pilot.press("/")
+        for char in "target":
+            await pilot.press(char)
+        await pilot.pause(0.01)
+
+        search_input = app.screen.query_one("#search-input")
+        assert search_input.value == "target"
+
+        # Mutate the node (edit it)
+        node_service.update_node(folder.id, name="Target Node Edited")
+        app.screen.refresh_tree(selected_node_id=folder.id)
+        await pilot.pause(0.01)
+
+        # Search query is preserved
+        assert search_input.value == "target"
+
+
 @pytest.mark.asyncio
 async def test_multiple_root_workspaces(session: Session) -> None:
     """Verify separate root workspaces with deterministic order."""
@@ -1213,20 +1368,23 @@ async def test_expansion_state_during_search(session: Session) -> None:
 
 
 def test_resolve_parent_id_sentinels() -> None:
-    """Verify resolve_parent_id covers blank sentinels explicitly."""
+    """Verify resolve_optional_uuid covers blank sentinels explicitly."""
     from textual.widgets import Select
 
-    from pathtree.ui.dialogs.add_node import resolve_parent_id as add_resolve
-    from pathtree.ui.dialogs.move_node import resolve_parent_id as move_resolve
+    from pathtree.ui.compat import resolve_optional_uuid
 
     test_uuid = uuid.uuid4()
 
-    for resolve in (add_resolve, move_resolve):
-        assert resolve(Select.BLANK) is None
-        assert resolve(Select.NULL) is None
-        assert resolve(None) is None
-        assert resolve(test_uuid) == test_uuid
-        assert resolve("not-a-uuid") is None
+    sel_blank = getattr(Select, "BLANK", None)
+    sel_null = getattr(Select, "NULL", None)
+
+    if sel_blank is not None:
+        assert resolve_optional_uuid(sel_blank) is None
+    if sel_null is not None:
+        assert resolve_optional_uuid(sel_null) is None
+    assert resolve_optional_uuid(None) is None
+    assert resolve_optional_uuid(test_uuid) == test_uuid
+    assert resolve_optional_uuid("not-a-uuid") is None
 
 
 @pytest.mark.asyncio
