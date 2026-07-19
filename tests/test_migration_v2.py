@@ -471,7 +471,7 @@ def test_create_node_without_legacy_node_type(session):
     # 1. Workspace
     n1 = Node(name="My Workspace", node_kind="workspace")
     created1 = repo.create(n1)
-    assert created1.legacy_node_type == "Folder"  # should default to Folder in DB
+    assert created1.legacy_node_type == "Workspace"  # mapped deterministically
 
     # 2. Folder
     n2 = Node(name="My Folder", node_kind="folder")
@@ -482,3 +482,72 @@ def test_create_node_without_legacy_node_type(session):
     n3 = Node(name="My Resource", node_kind="resource", resource_type="directory")
     created3 = repo.create(n3)
     assert created3.legacy_node_type == "Folder"
+
+
+def test_migration_v2_regression_not_null_no_default_node_type(tmp_path):
+    """Regression test with legacy v1 DB (node_type is NOT NULL with no default)."""
+    import sqlite3
+
+    db_file = tmp_path / "legacy_regression.db"
+    conn = sqlite3.connect(db_file)
+    cursor = conn.cursor()
+    # Create the v1 table where node_type is NOT NULL and has NO default
+    cursor.execute("""
+    CREATE TABLE nodes (
+        id CHAR(32) NOT NULL,
+        parent_id CHAR(32),
+        name VARCHAR NOT NULL,
+        node_type VARCHAR NOT NULL,
+        description VARCHAR,
+        icon VARCHAR,
+        path VARCHAR,
+        sort_order INTEGER NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        PRIMARY KEY (id),
+        FOREIGN KEY(parent_id) REFERENCES nodes (id)
+    );
+    """)
+    cursor.execute("PRAGMA user_version = 1;")
+    conn.commit()
+    conn.close()
+
+    # Run the migration to v2
+    engine = create_db_engine(db_file)
+    init_db(engine)
+
+    # Verify migration successful, then create all kinds via NodeService
+    with Session(engine) as session:
+        repo = NodeRepository(session)
+        service = NodeService(repo)
+
+        # - Workspace
+        ws = service.create_node(name="Workspace Node", node_kind="workspace")
+        assert ws.id is not None
+        assert ws.node_kind == "workspace"
+        assert ws.resource_type is None
+        assert ws.legacy_node_type == "Workspace"
+
+        # - Folder
+        folder = service.create_node(
+            name="Folder Node", node_kind="folder", parent_id=ws.id
+        )
+        assert folder.id is not None
+        assert folder.node_kind == "folder"
+        assert folder.resource_type is None
+        assert folder.legacy_node_type == "Folder"
+
+        # - Directory resource
+        res = service.create_node(
+            name="Directory Node",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=folder.id,
+            path="/tmp/test_dir",
+        )
+        assert res.id is not None
+        assert res.node_kind == "resource"
+        assert res.resource_type == "directory"
+        assert res.legacy_node_type == "Folder"
+
+    engine.dispose()

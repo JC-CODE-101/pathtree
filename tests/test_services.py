@@ -874,3 +874,26 @@ def test_get_descendants_cycle_protection(
     # Calling count_descendants must detect the cycle and raise CycleError
     with pytest.raises(CycleError, match="Cycle detected"):
         node_service.count_descendants(n1.id)
+
+
+def test_service_translates_repository_error(node_service: NodeService) -> None:
+    """Verify NodeService translates RepositoryErrors to service errors."""
+    from unittest import mock
+
+    from pathtree.database.errors import RepositoryIntegrityError
+    from pathtree.services.node_service import ValidationError
+
+    repo = node_service.repository
+
+    with mock.patch.object(
+        repo,
+        "create",
+        side_effect=RepositoryIntegrityError(
+            "Simulated integrity failure [SQL: INSERT INTO nodes]"
+        ),
+    ):
+        with pytest.raises(ValidationError) as excinfo:
+            node_service.create_node(name="Simulated", node_kind="workspace")
+        assert "Database persistence violated integrity" in str(excinfo.value)
+        assert "Simulated integrity failure" in str(excinfo.value)
+        assert "[SQL: INSERT INTO nodes]" not in str(excinfo.value)

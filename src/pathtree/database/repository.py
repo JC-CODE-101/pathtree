@@ -1,8 +1,10 @@
 import uuid
 from collections.abc import Sequence
 
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlmodel import Session, select
 
+from pathtree.database.errors import RepositoryError, RepositoryIntegrityError
 from pathtree.models.node import Node
 
 
@@ -21,6 +23,17 @@ class NodeRepository:
         """Initialize the repository with a database session."""
         self.session = session
 
+    def _set_legacy_node_type(self, node: Node) -> None:
+        """Map canonical types to legacy_node_type for DB compatibility."""
+        if node.node_kind == "workspace":
+            node.legacy_node_type = "Workspace"
+        elif node.node_kind == "folder":
+            node.legacy_node_type = "Folder"
+        elif node.node_kind == "resource" and node.resource_type == "directory":
+            node.legacy_node_type = "Folder"
+        else:
+            node.legacy_node_type = "Folder"
+
     def create(self, node: Node) -> Node:
         """Create a new Node in the database.
 
@@ -30,10 +43,20 @@ class NodeRepository:
         Returns:
             The persisted Node object.
         """
-        self.session.add(node)
-        self.session.commit()
-        self.session.refresh(node)
-        return node
+        self._set_legacy_node_type(node)
+        try:
+            self.session.add(node)
+            self.session.commit()
+            self.session.refresh(node)
+            return node
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
 
     def get_by_id(self, id: uuid.UUID) -> Node | None:
         """Retrieve a Node by its UUID.
@@ -83,10 +106,20 @@ class NodeRepository:
         from datetime import UTC, datetime
 
         node.updated_at = datetime.now(UTC)
-        self.session.add(node)
-        self.session.commit()
-        self.session.refresh(node)
-        return node
+        self._set_legacy_node_type(node)
+        try:
+            self.session.add(node)
+            self.session.commit()
+            self.session.refresh(node)
+            return node
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
 
     def delete(self, id: uuid.UUID) -> bool:
         """Delete a Node by its UUID.
@@ -99,9 +132,18 @@ class NodeRepository:
         """
         node = self.get_by_id(id)
         if node:
-            self.session.delete(node)
-            self.session.commit()
-            return True
+            try:
+                self.session.delete(node)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
         return False
 
     def get_descendants(self, node_id: uuid.UUID) -> list[Node]:
@@ -140,9 +182,14 @@ class NodeRepository:
                 self.session.flush()
             self.session.commit()
             return len(descendants)
-        except Exception:
+        except IntegrityError as e:
             self.session.rollback()
-            raise
+            raise RepositoryIntegrityError(
+                f"Database recursive deletion violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database recursive deletion failed: {e}") from e
 
     def has_sibling_with_name(
         self,
