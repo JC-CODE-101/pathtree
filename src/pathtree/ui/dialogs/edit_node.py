@@ -1,0 +1,241 @@
+import os
+import uuid
+
+from textual.app import ComposeResult
+from textual.containers import Container, Horizontal, Vertical
+from textual.screen import ModalScreen
+from textual.widgets import Button, Checkbox, Input, Label, Static
+
+from pathtree.services.node_service import NodeService, NodeServiceError
+
+
+class EditNodeDialog(ModalScreen[bool]):
+    """Dialog for editing an existing node."""
+
+    CSS = """
+    EditNodeDialog {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.5);
+    }
+
+    #dialog-container {
+        width: 60;
+        height: auto;
+        background: $panel;
+        border: thick $accent;
+        padding: 1 2;
+    }
+
+    .title {
+        text-align: center;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+
+    .field-container {
+        margin-bottom: 1;
+        height: auto;
+    }
+
+    .field-label {
+        text-style: bold;
+        margin-bottom: 0;
+    }
+
+    #status-area {
+        height: 3;
+        margin-top: 1;
+        color: $error;
+        text-style: bold;
+    }
+
+    #warning-area {
+        height: 2;
+        margin-top: 0;
+        color: $warning;
+        text-style: italic;
+    }
+
+    .buttons-container {
+        align: right middle;
+        margin-top: 1;
+        height: auto;
+    }
+
+    Button {
+        margin-left: 2;
+    }
+    """
+
+    def __init__(self, node_service: NodeService, node_id: uuid.UUID) -> None:
+        super().__init__()
+        self.node_service = node_service
+        self.node_id = node_id
+        self.node = self.node_service.get_node(node_id)
+        if self.node is None:
+            raise ValueError(f"Node {node_id} not found.")
+
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog-container"):
+            yield Label(f"Edit Node: {self.node.name}", classes="title")
+
+            with Vertical(classes="field-container"):
+                yield Label("Name *", classes="field-label")
+                yield Input(
+                    value=self.node.name,
+                    placeholder="Enter name...",
+                    id="input-name",
+                )
+
+            # Show path only for directory resource
+            is_directory = (
+                self.node.node_kind == "resource"
+                and self.node.resource_type == "directory"
+            )
+            with Vertical(classes="field-container", id="path-field-container") as vc:
+                yield Label("Path", classes="field-label")
+                yield Input(
+                    value=self.node.path or "",
+                    placeholder="Enter path...",
+                    id="input-path",
+                )
+                if not is_directory:
+                    vc.display = False
+
+            with Vertical(classes="field-container"):
+                yield Label("Description", classes="field-label")
+                yield Input(
+                    value=self.node.description or "",
+                    placeholder="Enter description...",
+                    id="input-description",
+                )
+
+            with Vertical(classes="field-container"):
+                yield Label("Icon", classes="field-label")
+                yield Input(
+                    value=self.node.icon or "",
+                    placeholder="Enter icon...",
+                    id="input-icon",
+                )
+
+            with Vertical(classes="field-container"):
+                yield Label("Sort Order", classes="field-label")
+                yield Input(
+                    value=str(self.node.sort_order),
+                    placeholder="0",
+                    id="input-sort-order",
+                )
+
+            with Horizontal(classes="field-container"):
+                yield Checkbox(
+                    "Favorite", value=self.node.is_favorite, id="checkbox-favorite"
+                )
+
+                # Show temporary checkbox. Toggling from temporary (True) to
+                # permanent (False) is promotion. Permanent nodes
+                # (is_temporary=False) cannot be demoted, so if node is already
+                # permanent, disable/hide.
+                cb_temp = Checkbox(
+                    "Temporary", value=self.node.is_temporary, id="checkbox-temporary"
+                )
+                if not self.node.is_temporary:
+                    cb_temp.display = False
+                yield cb_temp
+
+            yield Static("", id="warning-area")
+            yield Static("", id="status-area")
+
+            with Horizontal(classes="buttons-container"):
+                yield Button("Cancel", variant="default", id="btn-cancel")
+                yield Button("Save", variant="primary", id="btn-save")
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        is_directory = (
+            self.node.node_kind == "resource" and self.node.resource_type == "directory"
+        )
+        if event.input.id == "input-path" and is_directory:
+            path_val = event.value.strip()
+            warning_area = self.query_one("#warning-area", Static)
+            if path_val and not os.path.exists(os.path.expanduser(path_val)):
+                warning_area.update(
+                    "Path does not currently exist. The entry will still be saved."
+                )
+            else:
+                warning_area.update("")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-cancel":
+            self.dismiss(False)
+        elif event.button.id == "btn-save":
+            self.action_submit()
+
+    def action_submit(self) -> None:
+        status_area = self.query_one("#status-area", Static)
+        status_area.update("")
+
+        name = self.query_one("#input-name", Input).value
+        description = self.query_one("#input-description", Input).value or None
+        icon = self.query_one("#input-icon", Input).value or None
+
+        sort_order_str = self.query_one("#input-sort-order", Input).value
+        try:
+            sort_order = int(sort_order_str)
+        except ValueError:
+            status_area.update("Sort order must be an integer.")
+            return
+
+        is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
+
+        # Path is only saved/sent for Directory resources
+        is_directory = (
+            self.node.node_kind == "resource" and self.node.resource_type == "directory"
+        )
+        path = None
+        if is_directory:
+            path = self.query_one("#input-path", Input).value or None
+
+        # Determine temporary promotion
+        kwargs = {
+            "name": name,
+            "description": description,
+            "icon": icon,
+            "sort_order": sort_order,
+            "is_favorite": is_favorite,
+        }
+        if is_directory:
+            kwargs["path"] = path
+
+        # If temporary checkbox was displayed and got toggled to False, we're promoting
+        if self.node.is_temporary:
+            is_temp_val = self.query_one("#checkbox-temporary", Checkbox).value
+            kwargs["is_temporary"] = is_temp_val
+
+        try:
+            self.node_service.update_node(self.node_id, **kwargs)
+            self.dismiss(True)
+        except NodeServiceError as e:
+            status_area.update(str(e))
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+    # Key bindings inside dialog
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            event.prevent_default()
+            self.dismiss(False)
+        elif event.key == "enter":
+            focused = self.screen.focused
+            target_ids = {
+                "btn-save",
+                "input-name",
+                "input-path",
+                "input-description",
+                "input-icon",
+                "input-sort-order",
+                "checkbox-favorite",
+                "checkbox-temporary",
+            }
+            if focused and focused.id in target_ids:
+                event.prevent_default()
+                self.action_submit()

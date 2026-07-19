@@ -554,6 +554,45 @@ class NodeService:
             raise CycleError(str(e)) from e
         return True
 
+    def get_parent_choices(
+        self, exclude_node_id: uuid.UUID | None = None
+    ) -> list[tuple[str, uuid.UUID | None]]:
+        """Generate a list of parent choices in tree order.
+
+        Format: (label, node_id)
+        Where label is e.g. "Root", "Workspace Name", "Workspace Name / Folder Name"
+        """
+        choices: list[tuple[str, uuid.UUID | None]] = [("Root", None)]
+
+        try:
+            tree_nodes = self.get_validated_tree()
+        except CycleError:
+            # If tree contains cycles, default to just Root to prevent crashing
+            return choices
+
+        def traverse(tree_node: TreeNode, parent_label: str) -> None:
+            node = tree_node.node
+            if exclude_node_id is not None and node.id == exclude_node_id:
+                return  # Skip self and all descendants
+
+            # Construct label
+            if parent_label == "Root":
+                current_label = node.name
+            else:
+                current_label = f"{parent_label} / {node.name}"
+
+            # If workspace or folder, it's a valid choice
+            if node.node_kind in ("workspace", "folder"):
+                choices.append((current_label, node.id))
+
+            for child in tree_node.children:
+                traverse(child, current_label)
+
+        for root_tree_node in tree_nodes:
+            traverse(root_tree_node, "Root")
+
+        return choices
+
     def search_nodes(
         self,
         query: str | None = None,

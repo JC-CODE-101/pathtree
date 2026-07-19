@@ -1,4 +1,4 @@
-"""TUI layout and navigation tests."""
+"""TUI layout, navigation, and interactive management tests."""
 
 from pathlib import Path
 
@@ -9,6 +9,10 @@ from pathtree.database.repository import NodeRepository
 from pathtree.models.node import Node
 from pathtree.services.node_service import NodeService
 from pathtree.ui.app import PathTreeApp
+from pathtree.ui.dialogs.add_node import AddNodeDialog
+from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog
+from pathtree.ui.dialogs.edit_node import EditNodeDialog
+from pathtree.ui.dialogs.move_node import MoveNodeDialog
 
 
 @pytest.mark.asyncio
@@ -17,7 +21,6 @@ async def test_empty_database_rendering(session: Session) -> None:
     node_service = NodeService(NodeRepository(session))
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
@@ -41,19 +44,16 @@ async def test_nested_tree_rendering_and_order(session: Session) -> None:
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         tree = app.screen.query_one("#tree-view")
 
-        # Root nodes ordered by sort_order
         assert len(tree.root.children) == 2
         assert str(tree.root.children[0].label) == "Root 2"
         assert str(tree.root.children[1].label) == "Root 1"
 
-        # Children of Root 2 ordered by sort_order
         root2_tree_node = tree.root.children[0]
         assert len(root2_tree_node.children) == 2
         assert str(root2_tree_node.children[0].label) == "Child 2"
@@ -72,7 +72,6 @@ async def test_keyboard_navigation_and_expansion(session: Session) -> None:
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
@@ -80,32 +79,24 @@ async def test_keyboard_navigation_and_expansion(session: Session) -> None:
         tree = app.screen.query_one("#tree-view")
         details = app.screen.query_one("#details-panel")
 
-        # Initial focus should be on the first root node
         assert tree.cursor_node is not None
         assert str(tree.cursor_node.label) == "Root"
         assert "Top workspace" in details.render().plain
 
-        # Expand Root node
         await pilot.press("l")
         assert tree.cursor_node.is_expanded is True
 
-        # Move cursor down to Child node
         await pilot.press("j")
         assert str(tree.cursor_node.label) == "Child"
         assert "Sub folder" in details.render().plain
 
-        # Move cursor up to Root node
         await pilot.press("k")
         assert str(tree.cursor_node.label) == "Root"
 
-        # Collapse and parent test
-        # Change focus to Child
         await pilot.press("j")
-        # Collapse/Parent key should go up to Root
         await pilot.press("h")
         assert str(tree.cursor_node.label) == "Root"
 
-        # Collapse Root
         await pilot.press("h")
         assert tree.cursor_node.is_expanded is False
 
@@ -116,21 +107,27 @@ async def test_valid_enter_activation(session: Session, tmp_path: Path) -> None:
     repo = NodeRepository(session)
     valid_dir = tmp_path / "valid_dir"
     valid_dir.mkdir()
-    repo.create(Node(name="Root", path=str(valid_dir), sort_order=1))
+    repo.create(
+        Node(
+            name="Root",
+            path=str(valid_dir),
+            sort_order=1,
+            node_kind="resource",
+            resource_type="directory",
+        )
+    )
 
     output_file = tmp_path / "selected.txt"
 
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service, output=str(output_file))
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         await pilot.press("enter")
 
-        # Wait for app to exit
         while app.return_code is None:
             await pilot.pause(0.01)
 
@@ -148,27 +145,30 @@ async def test_invalid_enter_activation_does_not_exit(
     repo = NodeRepository(session)
     invalid_file = tmp_path / "some_file.txt"
     invalid_file.write_text("not a dir", encoding="utf-8")
-    repo.create(Node(name="Root", path=str(invalid_file), sort_order=1))
+    repo.create(
+        Node(
+            name="Root",
+            path=str(invalid_file),
+            sort_order=1,
+            node_kind="resource",
+            resource_type="directory",
+        )
+    )
 
     output_file = tmp_path / "selected.txt"
 
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service, output=str(output_file))
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         await pilot.press("enter")
 
-        # Output file should NOT be written
         assert not output_file.exists()
-
-        # App should still be running / not exited
         assert app.return_code is None
 
-        # Details panel should render the error
         details = app.screen.query_one("#details-panel")
         assert "Error" in details.render().plain
 
@@ -179,14 +179,12 @@ async def test_q_exits_safely(session: Session) -> None:
     node_service = NodeService(NodeRepository(session))
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         await pilot.press("q")
 
-        # Wait for app to exit
         while app.return_code is None:
             await pilot.pause(0.01)
 
@@ -199,14 +197,12 @@ async def test_ctrl_q_exits_safely(session: Session) -> None:
     node_service = NodeService(NodeRepository(session))
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         await pilot.press("ctrl+q")
 
-        # Wait for app to exit
         while app.return_code is None:
             await pilot.pause(0.01)
 
@@ -229,16 +225,13 @@ async def test_cyclic_database_handled_gracefully(session: Session) -> None:
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
-        # The tree view should be empty
         tree = app.screen.query_one("#tree-view")
         assert len(tree.root.children) == 0
 
-        # The details panel should display the cycle error message
         details = app.screen.query_one("#details-panel")
         assert "Cycle detected" in details.render().plain
 
@@ -251,22 +244,27 @@ async def test_enter_activation_without_output_file(
     repo = NodeRepository(session)
     valid_dir = tmp_path / "valid_dir"
     valid_dir.mkdir()
-    repo.create(Node(name="Root", path=str(valid_dir), sort_order=1))
+    repo.create(
+        Node(
+            name="Root",
+            path=str(valid_dir),
+            sort_order=1,
+            node_kind="resource",
+            resource_type="directory",
+        )
+    )
 
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service, output=None)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         await pilot.press("enter")
 
-        # App should still be running / not exited
         assert app.return_code is None
 
-        # Details panel should display the error about missing output file
         details = app.screen.query_one("#details-panel")
         assert "No output file specified" in details.render().plain
 
@@ -275,7 +273,6 @@ async def test_enter_activation_without_output_file(
 async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None:
     """Test full UI SearchInput layout, filtering, and type filters."""
     repo = NodeRepository(session)
-    # Seeding database
     workspace_node = repo.create(
         Node(
             name="My Workspace",
@@ -310,12 +307,10 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
-        # Wait for main screen to load
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
-        # 1. Verify Layout
         search_input = app.screen.query_one("#search-input")
         assert search_input is not None
         assert "Search nodes" in search_input.placeholder
@@ -325,16 +320,12 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         assert tree is not None
         assert details is not None
 
-        # 2. Focus transitions: '/' focuses search from tree
         assert app.screen.focused == tree
         await pilot.press("/")
         assert app.screen.focused == search_input
 
-        # Escape from search input clears search and returns focus to tree
         search_input.value = "target"
         await pilot.pause(0.01)
-        # Verify filtering worked:
-        # My Workspace -> Nested Folder -> Specific Target Dir
         assert len(tree.root.children) == 1
         assert str(tree.root.children[0].label) == "My Workspace"
 
@@ -342,34 +333,27 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         assert search_input.value == ""
         assert app.screen.focused == tree
 
-        # Focus via 's' key
         await pilot.press("s")
         assert app.screen.focused == search_input
 
-        # Down from search input focuses tree
         await pilot.press("down")
         assert app.screen.focused == tree
 
-        # Enter from search input focuses tree but doesn't activate immediately
         await pilot.press("s")
         assert app.screen.focused == search_input
         await pilot.press("enter")
         assert app.screen.focused == tree
         assert app.return_code is None
 
-        # 3. Filtering by name, path, and description
         await pilot.press("s")
-        # Substring search is case-insensitive
         for char in "SPECIFIC":
             await pilot.press(char.lower())
         await pilot.pause(0.01)
         assert search_input.value == "specific"
-        # Tree should only contain matched descendant and its ancestors
         assert len(tree.root.children) == 1
         root_child = tree.root.children[0]
         assert str(root_child.label) == "My Workspace"
 
-        # Search by path
         await pilot.press("escape")
         await pilot.press("s")
         for char in "target":
@@ -377,18 +361,14 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         await pilot.pause(0.01)
         assert len(tree.root.children) == 1
 
-        # Search by description
         await pilot.press("escape")
         await pilot.press("s")
         for char in "active":
             await pilot.press(char)
         await pilot.pause(0.01)
-        # Should match "My Workspace" since its description has "active"
         assert len(tree.root.children) == 1
         assert str(tree.root.children[0].label) == "My Workspace"
 
-        # 4. Type filters
-        # type:workspace
         await pilot.press("escape")
         await pilot.press("s")
         for char in "type:workspace":
@@ -397,18 +377,14 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         assert len(tree.root.children) == 1
         assert str(tree.root.children[0].label) == "My Workspace"
 
-        # type:folder
         await pilot.press("escape")
         await pilot.press("s")
         for char in "type:folder":
             await pilot.press(char)
         await pilot.pause(0.01)
         assert len(tree.root.children) == 1
-        # Root contains "My Workspace" because it's the ancestor of
-        # "Nested Folder" (type:folder)
         assert str(tree.root.children[0].label) == "My Workspace"
 
-        # type:directory
         await pilot.press("escape")
         await pilot.press("s")
         for char in "type:directory":
@@ -416,7 +392,6 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         await pilot.pause(0.01)
         assert len(tree.root.children) == 1
 
-        # Combined text + type filter
         await pilot.press("escape")
         await pilot.press("s")
         for char in "specific type:directory":
@@ -424,7 +399,6 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         await pilot.pause(0.01)
         assert len(tree.root.children) == 1
 
-        # No matches state
         await pilot.press("escape")
         await pilot.press("s")
         for char in "xyzabc123":
@@ -433,7 +407,6 @@ async def test_search_ui_and_filtering(session: Session, tmp_path: Path) -> None
         assert len(tree.root.children) == 0
         assert "No matching nodes" in details.render().plain
 
-        # Clearing restores tree and selection
         await pilot.press("escape")
         assert len(tree.root.children) == 1
         assert "Active developer workspace" in details.render().plain
@@ -455,28 +428,23 @@ async def test_pre_search_selection_restored(session: Session) -> None:
 
         tree = app.screen.query_one("#tree-view")
 
-        # Select node B (Banana Node)
         await pilot.press("j")
         assert tree.cursor_node is not None
         assert str(tree.cursor_node.label) == "Banana Node"
         assert tree.cursor_node.data == node_b.id
 
-        # Focus search and query so only node A matches (Apple)
         await pilot.press("/")
         for char in "apple":
             await pilot.press(char)
         await pilot.pause(0.01)
 
-        # Node A should be the visible fallback selection because B is hidden
         assert len(tree.root.children) == 1
         assert str(tree.cursor_node.label) == "Apple Node"
         assert tree.cursor_node.data == node_a.id
 
-        # Escape search
         await pilot.press("escape")
         await pilot.pause(0.01)
 
-        # Node B (Banana Node) should be restored as selected
         assert len(tree.root.children) == 2
         assert str(tree.cursor_node.label) == "Banana Node"
         assert tree.cursor_node.data == node_b.id
@@ -498,18 +466,15 @@ async def test_selection_preserved_when_visible(session: Session) -> None:
 
         tree = app.screen.query_one("#tree-view")
 
-        # Select node A (Apple Core)
         assert tree.cursor_node is not None
         assert str(tree.cursor_node.label) == "Apple Core"
         assert tree.cursor_node.data == node_a.id
 
-        # Focus search and query for "apple"
         await pilot.press("/")
         for char in "apple":
             await pilot.press(char)
         await pilot.pause(0.01)
 
-        # Apple Core is still visible and matches, so selection must be preserved
         assert len(tree.root.children) == 1
         assert str(tree.cursor_node.label) == "Apple Core"
         assert tree.cursor_node.data == node_a.id
@@ -528,22 +493,267 @@ async def test_empty_database_search_state(session: Session) -> None:
         tree = app.screen.query_one("#tree-view")
         details = app.screen.query_one("#details-panel")
 
-        # Verify initial empty-database state
         assert len(tree.root.children) == 0
         assert "No nodes yet" in details.render().plain
 
-        # Focus search and type a query
         await pilot.press("/")
         for char in "workspace":
             await pilot.press(char)
         await pilot.pause(0.01)
 
-        # Verify tree remains empty and details still shows "No nodes yet"
         assert len(tree.root.children) == 0
         assert "No nodes yet" in details.render().plain
 
-        # Press Escape and verify same state remains
         await pilot.press("escape")
         await pilot.pause(0.01)
         assert len(tree.root.children) == 0
         assert "No nodes yet" in details.render().plain
+
+
+# --- Milestone 0.0.2 PR 4 Interactive Form Dialog Tests ---
+
+
+@pytest.mark.asyncio
+async def test_add_node_dialog_creation_and_cancelling(session: Session) -> None:
+    """Test opening the Add Node dialog, typing in values, and cancelling."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Trigger dialog with 'a'
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+
+        # Cancel dialog
+        await pilot.press("escape")
+        assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
+async def test_add_node_validation_errors(session: Session) -> None:
+    """Test Add Node validation error handling.
+
+    Covers duplicate sibling names and empty names.
+    """
+    repo = NodeRepository(session)
+    repo.create(Node(name="Duplicate Workspace", node_kind="workspace"))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Trigger 'a'
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+
+        # Try to submit empty name
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        status_area = dialog.query_one("#status-area")
+        assert "Name cannot be empty" in status_area.render().plain
+
+        # Type a duplicate name
+        dialog.query_one("#input-name").value = "Duplicate Workspace"
+        dialog.query_one("#select-parent").value = None
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        assert "already exists" in status_area.render().plain
+
+        # Change name to valid and click Create
+        dialog.query_one("#input-name").value = "Unique Workspace"
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+        tree = app.screen.query_one("#tree-view")
+        assert len(tree.root.children) == 2
+
+
+@pytest.mark.asyncio
+async def test_add_node_warning_for_unavailable_path(session: Session) -> None:
+    """Test nonblocking warning displays when entering unavailable Directory path."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Trigger 'a'
+        await pilot.press("a")
+        dialog = app.screen
+
+        # Select Directory type (uses radio set)
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+
+        dialog.query_one("#input-name").value = "My Directory"
+        dialog.query_one("#input-path").value = "/nonexistent/path/for/warning/test"
+        await pilot.pause(0.05)
+
+        # Warning should be visible
+        warning_area = dialog.query_one("#warning-area")
+        assert "does not currently exist" in warning_area.render().plain
+
+        # Creation should still succeed
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+        tree = app.screen.query_one("#tree-view")
+        assert len(tree.root.children) == 1
+
+
+@pytest.mark.asyncio
+async def test_edit_node_flow(session: Session) -> None:
+    """Test Edit Node dialog loading, updating, validations, and promotion."""
+    repo = NodeRepository(session)
+    original_node = repo.create(
+        Node(
+            name="Temporary Directory",
+            node_kind="resource",
+            resource_type="directory",
+            path="/tmp/edit-test",
+            is_temporary=True,
+            description="Edit description",
+        )
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Trigger edit dialog 'e'
+        await pilot.press("e")
+        assert isinstance(app.screen, EditNodeDialog)
+        dialog = app.screen
+
+        # Form fields initialized correctly
+        assert dialog.query_one("#input-name").value == "Temporary Directory"
+        assert dialog.query_one("#input-path").value == "/tmp/edit-test"
+        assert dialog.query_one("#checkbox-temporary").value is True
+
+        # Promote temporary directory to permanent
+        dialog.query_one("#checkbox-temporary").value = False
+        dialog.query_one("#input-name").value = "Permanent Directory"
+        dialog.action_submit()
+        await pilot.pause(0.01)
+
+        assert app.screen.id == "main-screen"
+
+        # Verify DB and tree are refreshed, and selection is preserved
+        updated = node_service.get_node(original_node.id)
+        assert updated.is_temporary is False
+        assert updated.name == "Permanent Directory"
+
+        tree = app.screen.query_one("#tree-view")
+        assert str(tree.cursor_node.label) == "Permanent Directory"
+
+
+@pytest.mark.asyncio
+async def test_move_node_parent_selection_rejection_and_success(
+    session: Session,
+) -> None:
+    """Test Move Node dialog choices, exclusions, and successful parent relocation."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="Workspace One", node_kind="workspace"))
+    ws2 = repo.create(Node(name="Workspace Two", node_kind="workspace"))
+    res = repo.create(
+        Node(
+            name="My Resource",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=ws1.id,
+        )
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Select the resource node in the tree (requires expanding ws1 first)
+        await pilot.press("l")  # Expand ws1
+        await pilot.press("j")  # Go to resource
+        assert str(tree.cursor_node.label) == "My Resource"
+
+        # Trigger Move modal with 'm'
+        await pilot.press("m")
+        assert isinstance(app.screen, MoveNodeDialog)
+        dialog = app.screen
+
+        # Choices should include Root and Workspace nodes, excluding resources
+        select_widget = dialog.query_one("#select-parent")
+        choices = select_widget._options
+        # choices are internally represented as tuples: (label, value) or blank
+        choice_labels = [str(c[0]) if isinstance(c, tuple) else str(c) for c in choices]
+        assert "Root" in choice_labels
+        assert "Workspace One" in choice_labels
+        assert "Workspace Two" in choice_labels
+        assert "My Resource" not in choice_labels
+
+        # Move to Workspace Two
+        select_widget.value = ws2.id
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+        # Verify DB and selection
+        moved = node_service.get_node(res.id)
+        assert moved.parent_id == ws2.id
+        assert tree.cursor_node.data == res.id
+
+
+@pytest.mark.asyncio
+async def test_recursive_cascaded_deletion_dialog(session: Session) -> None:
+    """Test Delete confirmation dialog.
+
+    Displays correct descendant count and cascades recursively.
+    """
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Blender Workspace", node_kind="workspace"))
+    repo.create(Node(name="Blender Assets", node_kind="folder", parent_id=ws.id))
+    repo.create(Node(name="Blender Config", node_kind="folder", parent_id=ws.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Trigger delete on Blender Workspace
+        tree = app.screen.query_one("#tree-view")
+        assert str(tree.cursor_node.label) == "Blender Workspace"
+
+        await pilot.press("d")
+        assert isinstance(app.screen, ConfirmDeleteDialog)
+        dialog = app.screen
+
+        # Should display correct descendant count
+        assert dialog.descendant_count == 2
+        message_labels = [label.render().plain for label in dialog.query("Label")]
+        assert any("delete 2 descendants" in text for text in message_labels)
+
+        # Confirm Deletion
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+        # Verify everything is deleted
+        assert len(tree.root.children) == 0
+        assert node_service.get_node(ws.id) is None

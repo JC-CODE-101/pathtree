@@ -10,6 +10,10 @@ from textual.screen import Screen
 from textual.widgets import Footer, Header, Tree
 
 from pathtree.services.node_service import NodeService, NodeServiceError
+from pathtree.ui.dialogs.add_node import AddNodeDialog
+from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog
+from pathtree.ui.dialogs.edit_node import EditNodeDialog
+from pathtree.ui.dialogs.move_node import MoveNodeDialog
 from pathtree.ui.widgets.details import NodeDetailsPanel
 from pathtree.ui.widgets.search import SearchInput
 from pathtree.ui.widgets.tree import NodeTreeView
@@ -148,10 +152,205 @@ class MainScreen(Screen[None]):
 
     # --- Search Input Interactions & Event Handlers ---
 
+    def refresh_tree(
+        self,
+        selected_node_id: uuid.UUID | None = None,
+        fallback_node_id: uuid.UUID | None = None,
+    ) -> None:
+        """Refresh the visible tree.
+
+        Preserves search filter and selects the appropriate node.
+        """
+        tree = self.query_one("#tree-view", NodeTreeView)
+        details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+
+        # Update cached empty database status
+        try:
+            root_nodes = self.node_service.load_root_nodes()
+            self._db_is_empty = not root_nodes
+        except NodeServiceError as e:
+            self._db_is_empty = False
+            details_panel.update_error(str(e))
+            return
+
+        # Fetch filtered nodes using current query
+        try:
+            filtered_nodes = self.node_service.search_nodes(query=self._last_query)
+        except NodeServiceError as e:
+            details_panel.update_error(str(e))
+            return
+
+        is_now_non_empty = bool(self._last_query.strip())
+
+        # Build list of visible IDs in the filtered tree
+        visible_ids = []
+
+        def gather_ids(t_nodes):
+            for tn in t_nodes:
+                visible_ids.append(tn.node.id)
+                gather_ids(tn.children)
+
+        gather_ids(filtered_nodes)
+
+        # Selection fallback logic
+        target_id = None
+        if selected_node_id is not None and selected_node_id in visible_ids:
+            target_id = selected_node_id
+        elif fallback_node_id is not None and fallback_node_id in visible_ids:
+            target_id = fallback_node_id
+        elif visible_ids:
+            target_id = visible_ids[0]
+
+        # Keep track of selected ID
+        self._last_selected_node_id = target_id
+
+        # Reload tree in the widget
+        tree.load_tree(
+            filtered_nodes,
+            selected_node_id=target_id,
+            expand_all=is_now_non_empty,
+        )
+
+        if not filtered_nodes and is_now_non_empty:
+            tree.move_cursor(None)
+
+        self._update_details_and_selection()
+
     def on_node_tree_view_focus_search(self, event: NodeTreeView.FocusSearch) -> None:
         """Focus SearchInput when '/' or 's' is pressed in the tree."""
         search_input = self.query_one("#search-input", SearchInput)
         search_input.focus()
+
+    def on_node_tree_view_add_node(self, event: NodeTreeView.AddNode) -> None:
+        """Handle 'a' key in tree to open Add Node Dialog."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+
+        # Default parent behavior:
+        # No selection -> Root
+        # Workspace -> selected workspace
+        # Folder -> selected folder
+        # Directory resource -> parent of directory resource
+        default_parent_id = None
+        if tree.cursor_node is not None and tree.cursor_node.data is not None:
+            node = self.node_service.get_node(tree.cursor_node.data)
+            if node is not None:
+                if node.node_kind in ("workspace", "folder"):
+                    default_parent_id = node.id
+                elif node.node_kind == "resource":
+                    default_parent_id = node.parent_id
+
+        def handle_add_finished(new_node_id: uuid.UUID | None) -> None:
+            if new_node_id is not None:
+                # Get the node to show success feedback
+                new_node = self.node_service.get_node(new_node_id)
+                if new_node is not None:
+                    node_type_label = (
+                        new_node.resource_type
+                        if new_node.resource_type
+                        else new_node.node_kind
+                    )
+                    self.app.notify(f'Created {node_type_label} "{new_node.name}"')
+                self.refresh_tree(selected_node_id=new_node_id)
+            tree.focus()
+
+        self.app.push_screen(
+            AddNodeDialog(self.node_service, default_parent_id=default_parent_id),
+            callback=handle_add_finished,
+        )
+
+    def on_node_tree_view_edit_node(self, event: NodeTreeView.EditNode) -> None:
+        """Handle 'e' key in tree to open Edit Node Dialog."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+        if tree.cursor_node is None or tree.cursor_node.data is None:
+            return
+
+        node_id = tree.cursor_node.data
+
+        def handle_edit_finished(success: bool) -> None:
+            if success:
+                node = self.node_service.get_node(node_id)
+                if node is not None:
+                    self.app.notify(f'Updated "{node.name}"')
+                self.refresh_tree(selected_node_id=node_id)
+            tree.focus()
+
+        self.app.push_screen(
+            EditNodeDialog(self.node_service, node_id),
+            callback=handle_edit_finished,
+        )
+
+    def on_node_tree_view_move_node(self, event: NodeTreeView.MoveNode) -> None:
+        """Handle 'm' key in tree to open Move Node Dialog."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+        if tree.cursor_node is None or tree.cursor_node.data is None:
+            return
+
+        node_id = tree.cursor_node.data
+
+        def handle_move_finished(success: bool) -> None:
+            if success:
+                node = self.node_service.get_node(node_id)
+                if node is not None:
+                    self.app.notify(f'Moved "{node.name}"')
+                self.refresh_tree(selected_node_id=node_id)
+            tree.focus()
+
+        self.app.push_screen(
+            MoveNodeDialog(self.node_service, node_id),
+            callback=handle_move_finished,
+        )
+
+    def on_node_tree_view_delete_node(self, event: NodeTreeView.DeleteNode) -> None:
+        """Handle 'd' or 'delete' key in tree to open Confirm Delete Dialog."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+        if tree.cursor_node is None or tree.cursor_node.data is None:
+            return
+
+        node_id = tree.cursor_node.data
+        node = self.node_service.get_node(node_id)
+        if node is None:
+            return
+
+        # Determine fallbacks: next sibling, else previous sibling, else parent,
+        # else None (first visible root will be handled by refresh_tree).
+        # To find siblings or parent, let's look at cursor_node in Textual tree
+        fallback_node_id = None
+        cursor_node = tree.cursor_node
+        parent_node = cursor_node.parent
+        if parent_node is not None:
+            siblings = parent_node.children
+            try:
+                idx = siblings.index(cursor_node)
+                if idx + 1 < len(siblings):
+                    fallback_node_id = siblings[idx + 1].data
+                elif idx - 1 >= 0:
+                    fallback_node_id = siblings[idx - 1].data
+                elif parent_node != tree.root:
+                    fallback_node_id = parent_node.data
+            except ValueError:
+                pass
+
+        def handle_delete_finished(success: bool) -> None:
+            if success:
+                try:
+                    desc_count = self.node_service.count_descendants(node_id)
+                except Exception:
+                    desc_count = 0
+
+                if desc_count > 0:
+                    self.app.notify(
+                        f'Deleted "{node.name}" and {desc_count} descendants'
+                    )
+                else:
+                    self.app.notify(f'Deleted "{node.name}"')
+
+                self.refresh_tree(fallback_node_id=fallback_node_id)
+            tree.focus()
+
+        self.app.push_screen(
+            ConfirmDeleteDialog(self.node_service, node_id),
+            callback=handle_delete_finished,
+        )
 
     def on_input_changed(self, event: SearchInput.Changed) -> None:
         """Perform real-time filtering as search query changes."""
