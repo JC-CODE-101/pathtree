@@ -1,4 +1,5 @@
 import uuid
+from dataclasses import dataclass
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
@@ -8,7 +9,15 @@ from textual.widgets import Button, Label, Static
 from pathtree.services.node_service import NodeService, NodeServiceError
 
 
-class ConfirmDeleteDialog(ModalScreen[bool]):
+@dataclass
+class DeleteResult:
+    """Result returned by ConfirmDeleteDialog."""
+
+    deleted: bool
+    descendant_count: int
+
+
+class ConfirmDeleteDialog(ModalScreen[DeleteResult]):
     """Dialog for confirming deletion of a node.
 
     Displays descendant counts recursively.
@@ -106,7 +115,7 @@ class ConfirmDeleteDialog(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-cancel":
-            self.dismiss(False)
+            self.dismiss(DeleteResult(deleted=False, descendant_count=0))
         elif event.button.id == "btn-delete":
             self.action_submit()
 
@@ -116,20 +125,17 @@ class ConfirmDeleteDialog(ModalScreen[bool]):
 
         try:
             self.node_service.delete_node(self.node_id, recursive=True)
-            self.dismiss(True)
+            self.dismiss(
+                DeleteResult(deleted=True, descendant_count=self.descendant_count)
+            )
         except NodeServiceError as e:
             status_area.update(str(e))
 
     def action_cancel(self) -> None:
-        self.dismiss(False)
+        self.dismiss(DeleteResult(deleted=False, descendant_count=0))
 
     # Key bindings inside dialog
     def on_key(self, event) -> None:
         if event.key == "escape":
             event.prevent_default()
-            self.dismiss(False)
-        elif event.key == "enter":
-            focused = self.screen.focused
-            if focused and focused.id in ("btn-delete", "btn-cancel"):
-                event.prevent_default()
-                self.action_submit()
+            self.dismiss(DeleteResult(deleted=False, descendant_count=0))

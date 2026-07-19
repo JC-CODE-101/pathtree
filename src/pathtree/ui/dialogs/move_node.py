@@ -131,8 +131,3 @@ class MoveNodeDialog(ModalScreen[bool]):
         if event.key == "escape":
             event.prevent_default()
             self.dismiss(False)
-        elif event.key == "enter":
-            focused = self.screen.focused
-            if focused and focused.id in ("btn-move", "select-parent"):
-                event.prevent_default()
-                self.action_submit()

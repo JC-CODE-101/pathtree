@@ -233,8 +233,6 @@ class EditNodeDialog(ModalScreen[bool]):
                 "input-description",
                 "input-icon",
                 "input-sort-order",
-                "checkbox-favorite",
-                "checkbox-temporary",
             }
             if focused and focused.id in target_ids:
                 event.prevent_default()

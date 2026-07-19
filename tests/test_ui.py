@@ -749,11 +749,96 @@ async def test_recursive_cascaded_deletion_dialog(session: Session) -> None:
         message_labels = [label.render().plain for label in dialog.query("Label")]
         assert any("delete 2 descendants" in text for text in message_labels)
 
-        # Confirm Deletion
-        dialog.action_submit()
+        # Confirm Deletion using Delete button click/enter
+        dialog.query_one("#btn-delete").focus()
+        await pilot.press("enter")
         await pilot.pause(0.01)
         assert app.screen.id == "main-screen"
 
         # Verify everything is deleted
         assert len(tree.root.children) == 0
         assert node_service.get_node(ws.id) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_dialog_cancellation_regression(session: Session) -> None:
+    """Test focusing Cancel and pressing Enter closes dialog without deletion.
+
+    Ensures no deletion or notification occurs.
+    """
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Safe Workspace", node_kind="workspace"))
+    child = repo.create(Node(name="Safe Assets", node_kind="folder", parent_id=ws.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        await pilot.press("d")
+        assert isinstance(app.screen, ConfirmDeleteDialog)
+        dialog = app.screen
+
+        # Focus Cancel button and press Enter
+        dialog.query_one("#btn-cancel").focus()
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+
+        # Assert dialog closed
+        assert app.screen.id == "main-screen"
+
+        # Assert node and descendant still exist in DB
+        assert node_service.get_node(ws.id) is not None
+        assert node_service.get_node(child.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_leaf_reports_zero_descendants(session: Session) -> None:
+    """Test that deleting a leaf node reports zero descendants in notification."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Leaf Node", node_kind="workspace"))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        await pilot.press("d")
+        assert isinstance(app.screen, ConfirmDeleteDialog)
+        dialog = app.screen
+        assert dialog.descendant_count == 0
+
+        # Confirm Deletion
+        dialog.query_one("#btn-delete").focus()
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+
+        assert app.screen.id == "main-screen"
+        assert node_service.get_node(ws.id) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_escape_cancellation(session: Session) -> None:
+    """Test that pressing Escape closes the Delete dialog without deletion."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Safe Node", node_kind="workspace"))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        await pilot.press("d")
+        assert isinstance(app.screen, ConfirmDeleteDialog)
+
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+
+        assert app.screen.id == "main-screen"
+        assert node_service.get_node(ws.id) is not None

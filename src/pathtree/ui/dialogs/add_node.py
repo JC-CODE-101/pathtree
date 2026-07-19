@@ -244,8 +244,6 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 "input-path",
                 "input-description",
                 "input-icon",
-                "checkbox-favorite",
-                "checkbox-temporary",
             }
             if focused and focused.id in target_ids:
                 event.prevent_default()

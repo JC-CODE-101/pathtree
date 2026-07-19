@@ -11,7 +11,7 @@ from textual.widgets import Footer, Header, Tree
 
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.dialogs.add_node import AddNodeDialog
-from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog
+from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog, DeleteResult
 from pathtree.ui.dialogs.edit_node import EditNodeDialog
 from pathtree.ui.dialogs.move_node import MoveNodeDialog
 from pathtree.ui.widgets.details import NodeDetailsPanel
@@ -330,13 +330,9 @@ class MainScreen(Screen[None]):
             except ValueError:
                 pass
 
-        def handle_delete_finished(success: bool) -> None:
-            if success:
-                try:
-                    desc_count = self.node_service.count_descendants(node_id)
-                except Exception:
-                    desc_count = 0
-
+        def handle_delete_finished(result: DeleteResult | None) -> None:
+            if result is not None and result.deleted:
+                desc_count = result.descendant_count
                 if desc_count > 0:
                     self.app.notify(
                         f'Deleted "{node.name}" and {desc_count} descendants'
