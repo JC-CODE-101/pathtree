@@ -110,7 +110,7 @@ class MoveNodeDialog(ModalScreen[bool]):
                 yield Select(
                     parent_choices,
                     value=self.node.parent_id,
-                    allow_blank=True,
+                    allow_blank=(self.node.node_kind == "workspace"),
                     id="select-parent",
                 )
 

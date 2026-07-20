@@ -1091,6 +1091,131 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+@pytest.mark.asyncio
+async def test_add_and_move_blank_selection_constraints(session: Session) -> None:
+    """Verify select validation and blank selection constraints in dialogs."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Workspace One", node_kind="workspace"))
+    folder = repo.create(Node(name="Folder One", node_kind="folder", parent_id=ws.id))
+    repo.create(
+        Node(
+            name="Dir One",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=folder.id,
+        )
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Navigate to Workspace Node to start
+        ws_node = next(
+            child for child in tree.root.children if str(child.label) == "Workspace One"
+        )
+        tree.move_cursor(ws_node)
+        await pilot.pause(0.01)
+
+        # 1. Folder Add Select cannot become blank when valid parents exist
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+
+        select_parent = dialog.query_one("#select-parent")
+        assert select_parent._allow_blank is False
+        await pilot.press("escape")
+
+        # 2. Directory Add Select cannot become blank when valid parents exist
+        await pilot.press("a")
+        dialog = app.screen
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+
+        select_parent = dialog.query_one("#select-parent")
+        assert select_parent._allow_blank is False
+        await pilot.press("escape")
+
+        # Navigate to Folder Node
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to Folder One
+        assert str(tree.cursor_node.label) == "Folder One"
+
+        # 3. Folder Move Select cannot become blank
+        await pilot.press("m")
+        assert isinstance(app.screen, MoveNodeDialog)
+        move_dialog = app.screen
+        select_parent_move = move_dialog.query_one("#select-parent")
+        assert select_parent_move._allow_blank is False
+        await pilot.press("escape")
+
+        # Navigate to Dir Node
+        await pilot.press("l")  # Expand Folder
+        await pilot.press("j")  # Move to Dir One
+        assert str(tree.cursor_node.label) == "Dir One"
+
+        # 4. Directory Move Select cannot become blank
+        await pilot.press("m")
+        assert isinstance(app.screen, MoveNodeDialog)
+        move_dialog = app.screen
+        select_parent_move = move_dialog.query_one("#select-parent")
+        assert select_parent_move._allow_blank is False
+        await pilot.press("escape")
+
+        # Navigate back to Workspace One
+        tree.move_cursor(ws_node)
+        await pilot.pause(0.01)
+
+        # 5. Workspace Move still resolves Root to parent_id=None
+        await pilot.press("m")
+        assert isinstance(app.screen, MoveNodeDialog)
+        move_dialog = app.screen
+        select_parent_move = move_dialog.query_one("#select-parent")
+        assert select_parent_move._allow_blank is True
+        # Submit to resolve to None safely
+        move_dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
+async def test_no_valid_add_parent_disables_or_blocks_creation(
+    session: Session,
+) -> None:
+    """Verify that when no valid parent exists, create button is disabled."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # 1. Open add node dialog
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+
+        # Switch to Folder Node Type (no workspaces exist in DB)
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+
+        select_parent = dialog.query_one("#select-parent")
+        create_btn = dialog.query_one("#btn-create")
+
+        # Both Select and Create Button must be disabled
+        assert select_parent.disabled is True
+        assert create_btn.disabled is True
+
+        await pilot.press("escape")
+
+
 def test_sentinel_compatibility_scenarios(monkeypatch) -> None:
     """Verify resolve_optional_uuid with simulated configurations."""
     import pathtree.ui.compat as compat

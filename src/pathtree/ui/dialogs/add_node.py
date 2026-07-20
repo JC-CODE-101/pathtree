@@ -161,13 +161,18 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         select_parent = self.query_one("#select-parent", Select)
         warning_area = self.query_one("#warning-area", Static)
 
+        create_btn = self.query_one("#btn-create", Button)
+
         if self.selected_type == "workspace":
             path_container.display = False
             temp_checkbox.display = False
             parent_container.display = False
             select_parent.disabled = True
+            select_parent._allow_blank = True
+            select_parent._legal_values.add(_BLANK_SENTINEL)
             select_parent.value = _BLANK_SENTINEL
             warning_area.update("")
+            create_btn.disabled = False
             return
 
         # Folder or Directory:
@@ -190,6 +195,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 ):
                     valid_choices.append((label, val_id))
 
+        # Dynamically set allow_blank BEFORE setting options to avoid EmptySelectError
+        select_parent._allow_blank = not bool(valid_choices)
         select_parent.set_options(valid_choices)
 
         # Derives the default parent only when valid for chosen type
@@ -208,15 +215,19 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             if valid_choices:
                 select_parent.value = valid_choices[0][1]
             else:
+                select_parent._allow_blank = True
                 select_parent.value = _BLANK_SENTINEL
 
         # If no valid parent workspaces/folders are available, show clear message
         if not valid_choices:
+            select_parent.disabled = True
+            create_btn.disabled = True
             warning_area.update(
                 f"No valid parent Workspaces or Folders available to create a "
                 f"{self.selected_type.capitalize()}. Please create a Workspace first."
             )
         else:
+            create_btn.disabled = False
             warning_area.update("")
 
     def on_input_changed(self, event: Input.Changed) -> None:
