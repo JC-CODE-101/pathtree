@@ -1027,9 +1027,6 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         # Workspace is selected by default -> Parent is hidden/disabled
         select_parent = dialog.query_one("#select-parent")
         assert select_parent.disabled is True
-        assert select_parent.value is None or not isinstance(
-            select_parent.value, uuid.UUID
-        )
 
         # Submit creates at root
         dialog.query_one("#input-name").value = "WS Two"
@@ -1122,7 +1119,7 @@ async def test_add_and_move_blank_selection_constraints(session: Session) -> Non
         tree.move_cursor(ws_node)
         await pilot.pause(0.01)
 
-        # 1. Folder Add Select cannot become blank when valid parents exist
+        # 1. Folder Add Select always has a valid UUID parent selected
         await pilot.press("a")
         assert isinstance(app.screen, AddNodeDialog)
         dialog = app.screen
@@ -1130,17 +1127,17 @@ async def test_add_and_move_blank_selection_constraints(session: Session) -> Non
         await pilot.pause(0.01)
 
         select_parent = dialog.query_one("#select-parent")
-        assert select_parent._allow_blank is False
+        assert isinstance(select_parent.value, uuid.UUID)
         await pilot.press("escape")
 
-        # 2. Directory Add Select cannot become blank when valid parents exist
+        # 2. Directory Add Select always has a valid UUID parent selected
         await pilot.press("a")
         dialog = app.screen
         await pilot.click("#radio-directory")
         await pilot.pause(0.01)
 
         select_parent = dialog.query_one("#select-parent")
-        assert select_parent._allow_blank is False
+        assert isinstance(select_parent.value, uuid.UUID)
         await pilot.press("escape")
 
         # Navigate to Folder Node
@@ -1148,12 +1145,12 @@ async def test_add_and_move_blank_selection_constraints(session: Session) -> Non
         await pilot.press("j")  # Move to Folder One
         assert str(tree.cursor_node.label) == "Folder One"
 
-        # 3. Folder Move Select cannot become blank
+        # 3. Folder Move Select always has a valid UUID parent selected
         await pilot.press("m")
         assert isinstance(app.screen, MoveNodeDialog)
         move_dialog = app.screen
         select_parent_move = move_dialog.query_one("#select-parent")
-        assert select_parent_move._allow_blank is False
+        assert isinstance(select_parent_move.value, uuid.UUID)
         await pilot.press("escape")
 
         # Navigate to Dir Node
@@ -1161,12 +1158,12 @@ async def test_add_and_move_blank_selection_constraints(session: Session) -> Non
         await pilot.press("j")  # Move to Dir One
         assert str(tree.cursor_node.label) == "Dir One"
 
-        # 4. Directory Move Select cannot become blank
+        # 4. Directory Move Select always has a valid UUID parent selected
         await pilot.press("m")
         assert isinstance(app.screen, MoveNodeDialog)
         move_dialog = app.screen
         select_parent_move = move_dialog.query_one("#select-parent")
-        assert select_parent_move._allow_blank is False
+        assert isinstance(select_parent_move.value, uuid.UUID)
         await pilot.press("escape")
 
         # Navigate back to Workspace One
@@ -1178,7 +1175,6 @@ async def test_add_and_move_blank_selection_constraints(session: Session) -> Non
         assert isinstance(app.screen, MoveNodeDialog)
         move_dialog = app.screen
         select_parent_move = move_dialog.query_one("#select-parent")
-        assert select_parent_move._allow_blank is True
         # Submit to resolve to None safely
         move_dialog.action_submit()
         await pilot.pause(0.01)
@@ -1557,11 +1553,7 @@ async def test_add_dialog_radio_set_switching(session: Session) -> None:
         # Switch back to Workspace
         await pilot.click("#radio-workspace")
         await pilot.pause(0.01)
-        # Switching Folder/Directory -> Workspace clears the previous parent
         assert select_parent.disabled is True
-        assert select_parent.value is None or not isinstance(
-            select_parent.value, uuid.UUID
-        )
 
         # Cancel
         await pilot.press("escape")

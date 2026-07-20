@@ -16,7 +16,7 @@ from textual.widgets import (
 )
 
 from pathtree.services.node_service import NodeService, NodeServiceError
-from pathtree.ui.compat import _BLANK_SENTINEL, resolve_optional_uuid
+from pathtree.ui.compat import resolve_optional_uuid
 
 
 class AddNodeDialog(ModalScreen[uuid.UUID | None]):
@@ -125,7 +125,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 yield Select(
                     parent_choices,
                     value=self.default_parent_id,
-                    allow_blank=True,
+                    allow_blank=False,
                     id="select-parent",
                 )
 
@@ -168,9 +168,6 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             temp_checkbox.display = False
             parent_container.display = False
             select_parent.disabled = True
-            select_parent._allow_blank = True
-            select_parent._legal_values.add(_BLANK_SENTINEL)
-            select_parent.value = _BLANK_SENTINEL
             warning_area.update("")
             create_btn.disabled = False
             return
@@ -195,9 +192,18 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 ):
                     valid_choices.append((label, val_id))
 
-        # Dynamically set allow_blank BEFORE setting options to avoid EmptySelectError
-        select_parent._allow_blank = not bool(valid_choices)
+        if not valid_choices:
+            select_parent.disabled = True
+            create_btn.disabled = True
+            warning_area.update(
+                f"No valid parent Workspaces or Folders available to create a "
+                f"{self.selected_type.capitalize()}. Please create a Workspace first."
+            )
+            return
+
         select_parent.set_options(valid_choices)
+        create_btn.disabled = False
+        warning_area.update("")
 
         # Derives the default parent only when valid for chosen type
         valid = False
@@ -212,23 +218,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         if valid:
             select_parent.value = self.default_parent_id
         else:
-            if valid_choices:
-                select_parent.value = valid_choices[0][1]
-            else:
-                select_parent._allow_blank = True
-                select_parent.value = _BLANK_SENTINEL
-
-        # If no valid parent workspaces/folders are available, show clear message
-        if not valid_choices:
-            select_parent.disabled = True
-            create_btn.disabled = True
-            warning_area.update(
-                f"No valid parent Workspaces or Folders available to create a "
-                f"{self.selected_type.capitalize()}. Please create a Workspace first."
-            )
-        else:
-            create_btn.disabled = False
-            warning_area.update("")
+            select_parent.value = valid_choices[0][1]
 
     def on_input_changed(self, event: Input.Changed) -> None:
         # We handle real-time path validation warning for Directory path
