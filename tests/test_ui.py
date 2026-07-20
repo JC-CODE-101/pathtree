@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from sqlmodel import Session
+from textual.app import App, ComposeResult
 
 from pathtree.database.repository import NodeRepository
 from pathtree.models.node import Node
@@ -1088,6 +1089,160 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+class AutocompleteTestApp(App[None]):
+    """Simple test app to isolate PathAutocomplete testing."""
+
+    def compose(self) -> ComposeResult:
+        from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
+
+        yield PathAutocomplete(id="input-path")
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_comprehensive(tmp_path: Path, monkeypatch) -> None:
+    """Comprehensive test for PathAutocomplete widget covering all requirements."""
+    import os
+
+    from textual.widgets import OptionList
+
+    from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
+
+    # Set up directories and files under tmp_path
+    (tmp_path / "blocks").mkdir()
+    (tmp_path / "blender").mkdir()
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "images").mkdir()
+    (tmp_path / "some_file.txt").touch()
+
+    # Change working directory to tmp_path for relative tests
+    monkeypatch.chdir(tmp_path)
+
+    # Mock tilde expansion
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path)))
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        # 1. Typing generates suggestions (only directories, sorted)
+        await pilot.press("b")
+        await pilot.press("l")
+        await pilot.pause(0.01)
+
+        assert widget.is_suggestions_visible is True
+        option_list = widget.query_one("#path-suggestions-list", OptionList)
+        assert option_list.option_count == 2
+        assert str(option_list.get_option_at_index(0).prompt) == "blender/"
+        assert str(option_list.get_option_at_index(1).prompt) == "blocks/"
+        assert option_list.highlighted == 0
+
+        # 2. Ctrl+n / Ctrl+p navigation
+        await pilot.press("ctrl+n")
+        assert option_list.highlighted == 1
+        from textual.events import Key
+
+        input_widget.post_message(Key("ctrl+p", None))
+        await pilot.pause(0.01)
+        assert option_list.highlighted == 0
+
+        # 3. Up / Down navigation
+        await pilot.press("down")
+        assert option_list.highlighted == 1
+        await pilot.press("up")
+        assert option_list.highlighted == 0
+
+        # 4. Tab accepts highlighted suggestion
+        await pilot.press("tab")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is False
+        assert input_widget.value == "blender/"
+
+        # 5. Enter accepts suggestion before submit
+        input_widget.value = ""
+        await pilot.press("b")
+        await pilot.press("l")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is True
+
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is False
+        assert input_widget.value == "blender/"
+
+        # 6. Escape closes suggestions
+        input_widget.value = ""
+        await pilot.press("b")
+        await pilot.press("l")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is True
+
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is False
+        assert input_widget.value == "bl"
+
+        # 7. Relative paths
+        input_widget.value = ""
+        await pilot.press(".")
+        await pilot.press("/")
+        await pilot.press("b")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is True
+        assert str(option_list.get_option_at_index(0).prompt) == "blender/"
+        await pilot.press("tab")
+        await pilot.pause(0.01)
+        assert input_widget.value == "./blender/"
+
+        # 8. Absolute paths
+        input_widget.value = ""
+        input_widget.value = str(tmp_path) + "/b"
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is True
+        assert str(option_list.get_option_at_index(0).prompt) == "blender/"
+        await pilot.press("tab")
+        await pilot.pause(0.01)
+        assert input_widget.value == str(tmp_path) + "/blender/"
+
+        # 9. Tilde expansion
+        input_widget.value = ""
+        await pilot.press("~")
+        await pilot.press("/")
+        await pilot.press("b")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is True
+        assert str(option_list.get_option_at_index(0).prompt) == "blender/"
+        await pilot.press("tab")
+        await pilot.pause(0.01)
+        assert input_widget.value == "~/blender/"
+
+        # 10. No matches
+        input_widget.value = ""
+        await pilot.press("x")
+        await pilot.press("y")
+        await pilot.press("z")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is True
+        assert option_list.option_count == 1
+        assert option_list.get_option_at_index(0).disabled is True
+        assert "No matching directories" in str(
+            option_list.get_option_at_index(0).prompt
+        )
+
+        # 11. Nonexistent parent directory
+        input_widget.value = ""
+        input_widget.value = "nonexistent/b"
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is True
+        assert option_list.option_count == 1
+        assert option_list.get_option_at_index(0).disabled is True
+        assert "Directory does not exist" in str(
+            option_list.get_option_at_index(0).prompt
+        )
+
+
 @pytest.mark.asyncio
 async def test_add_node_dialog_vim_navigation(session: Session) -> None:
     """Test Vim-style navigation (j/k) and standard arrow key
@@ -1213,6 +1368,9 @@ async def test_add_node_dialog_vim_navigation(session: Session) -> None:
         # Cancel dialog
         await pilot.press("escape")
         await pilot.pause(0.01)
+        if app.screen.id != "main-screen":
+            await pilot.press("escape")
+            await pilot.pause(0.01)
         assert app.screen.id == "main-screen"
 
 

@@ -7,6 +7,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Static
 
 from pathtree.services.node_service import NodeService, NodeServiceError
+from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
 class EditNodeDialog(ModalScreen[bool]):
@@ -94,7 +95,7 @@ class EditNodeDialog(ModalScreen[bool]):
             )
             with Vertical(classes="field-container", id="path-field-container") as vc:
                 yield Label("Path", classes="field-label")
-                yield Input(
+                yield PathAutocomplete(
                     value=self.node.path or "",
                     placeholder="Enter path...",
                     id="input-path",

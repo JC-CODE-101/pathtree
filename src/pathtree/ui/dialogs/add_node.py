@@ -17,6 +17,7 @@ from textual.widgets import (
 
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.compat import resolve_optional_uuid
+from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
 class AddNodeDialog(ModalScreen[uuid.UUID | None]):
@@ -107,7 +108,9 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
             with Vertical(classes="field-container", id="path-field-container"):
                 yield Label("Path", classes="field-label")
-                yield Input(placeholder="Enter path (optional)...", id="input-path")
+                yield PathAutocomplete(
+                    placeholder="Enter path (optional)...", id="input-path"
+                )
 
             with Vertical(classes="field-container"):
                 yield Label("Description", classes="field-label")
