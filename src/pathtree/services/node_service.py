@@ -170,6 +170,7 @@ class NodeService:
         self,
         node_id: uuid.UUID | None,
         parent_id: uuid.UUID | None,
+        node_kind: str | None = None,
     ) -> None:
         """Validate parent-child relationship to prevent invalid hierarchies.
 
@@ -180,10 +181,25 @@ class NodeService:
 
         Raises clear, project-specific exceptions for invalid operations.
         """
+        if node_kind is None and node_id is not None:
+            node = self.repository.get_by_id(node_id)
+            if node is not None:
+                node_kind = node.node_kind
+
+        # 1. Enforce hierarchy rules for Workspaces, Folders, and Directories
+        if node_kind == "workspace" and parent_id is not None:
+            raise ValidationError("Workspace may only exist at Root.")
+
+        if node_kind in ("folder", "resource") and parent_id is None:
+            raise ValidationError(
+                f"{node_kind.capitalize()} cannot be created under Root "
+                "(parent must be Workspace or Folder)."
+            )
+
         if parent_id is None:
             return
 
-        # 1. Prevent a node from becoming its own parent
+        # 2. Prevent a node from becoming its own parent
         if node_id is not None and node_id == parent_id:
             raise SelfParentError(f"Node {node_id} cannot be its own parent.")
 
@@ -327,8 +343,8 @@ class NodeService:
         if not trimmed_name:
             raise EmptyNodeNameError("Name cannot be empty after trimming.")
 
-        # 2. Validate requested parent (if parent_id is not None)
-        self.validate_parent(None, parent_id)
+        # 2. Validate requested parent
+        self.validate_parent(None, parent_id, node_kind=node_kind)
 
         # 3. Validate sibling-name uniqueness
         if self.repository.has_sibling_with_name(parent_id, trimmed_name):
@@ -527,7 +543,7 @@ class NodeService:
             return node
 
         # Validate parent kind and cycle / self-parenting
-        self.validate_parent(node_id, new_parent_id)
+        self.validate_parent(node_id, new_parent_id, node_kind=node.node_kind)
 
         # Validate sibling name clash in destination
         if self.repository.has_sibling_with_name(

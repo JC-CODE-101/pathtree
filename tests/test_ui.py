@@ -1,5 +1,6 @@
 """TUI layout, navigation, and interactive management tests."""
 
+import uuid
 from pathlib import Path
 
 import pytest
@@ -580,6 +581,8 @@ async def test_add_node_validation_errors(session: Session) -> None:
 async def test_add_node_warning_for_unavailable_path(session: Session) -> None:
     """Test nonblocking warning displays when entering unavailable Directory path."""
     node_service = NodeService(NodeRepository(session))
+    # Create a workspace so there's a valid parent
+    ws = node_service.create_node(name="My Workspace", node_kind="workspace")
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
         while app.screen.id != "main-screen":
@@ -596,6 +599,7 @@ async def test_add_node_warning_for_unavailable_path(session: Session) -> None:
 
         dialog.query_one("#input-name").value = "My Directory"
         dialog.query_one("#input-path").value = "/nonexistent/path/for/warning/test"
+        dialog.query_one("#select-parent").value = ws.id
         await pilot.pause(0.05)
 
         # Warning should be visible
@@ -696,12 +700,12 @@ async def test_move_node_parent_selection_rejection_and_success(
         assert isinstance(app.screen, MoveNodeDialog)
         dialog = app.screen
 
-        # Choices should include Root and Workspace nodes, excluding resources
+        # Choices should include Workspace nodes, excluding Root and resources
         select_widget = dialog.query_one("#select-parent")
         choices = select_widget._options
         # choices are internally represented as tuples: (label, value) or blank
         choice_labels = [str(c[0]) if isinstance(c, tuple) else str(c) for c in choices]
-        assert "Root" in choice_labels
+        assert "Root" not in choice_labels
         assert "Workspace One" in choice_labels
         assert "Workspace Two" in choice_labels
         assert "My Resource" not in choice_labels
@@ -991,3 +995,565 @@ async def test_add_node_dialog_persistence_failure_display(session: Session) -> 
 
             # App didn't crash and no traceback screen is pushed
             assert app.screen == dialog
+
+
+@pytest.mark.asyncio
+async def test_add_dialog_parent_behavior(session: Session) -> None:
+    """Verify context-sensitive parent behavior in AddNodeDialog."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Workspace Node", node_kind="workspace"))
+    folder = repo.create(Node(name="Folder Node", node_kind="folder", parent_id=ws.id))
+    repo.create(
+        Node(
+            name="Dir Node",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=folder.id,
+        )
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # 1. Open dialog with 'a' while workspace selected
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+
+        # Workspace is selected by default -> Parent is hidden/disabled
+        select_parent = dialog.query_one("#select-parent")
+        assert select_parent.disabled is True
+
+        # Submit creates at root
+        dialog.query_one("#input-name").value = "WS Two"
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+        assert len(node_service.load_root_nodes()) == 2
+
+        # 2. Open dialog while Folder selected
+        # Expand WS Node first
+        tree = app.screen.query_one("#tree-view")
+        # Move cursor to Workspace Node explicitly
+        ws_tree_node = next(
+            child
+            for child in tree.root.children
+            if str(child.label) == "Workspace Node"
+        )
+        tree.move_cursor(ws_tree_node)
+        await pilot.pause(0.01)
+
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Go to Folder Node
+        assert str(tree.cursor_node.label) == "Folder Node"
+
+        await pilot.press("a")
+        dialog = app.screen
+        # Switch to Folder Node Type
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+
+        # Parent is enabled and has Folder Node as default value
+        select_parent = dialog.query_one("#select-parent")
+        assert select_parent.disabled is False
+        assert select_parent.value == folder.id
+
+        # Verify Directory resource is absent from choices
+        choices = select_parent._options
+        choice_labels = [str(c[0]) if isinstance(c, tuple) else str(c) for c in choices]
+        assert "Dir Node" not in choice_labels
+
+        # Cancel dialog
+        await pilot.press("escape")
+
+        # 3. Open dialog while Directory selected -> uses its parent
+        # (Folder Node) as default parent.
+        await pilot.press("l")  # Expand Folder
+        await pilot.press("j")  # Go to Directory Node
+        assert str(tree.cursor_node.label) == "Dir Node"
+
+        await pilot.press("a")
+        dialog = app.screen
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+
+        select_parent = dialog.query_one("#select-parent")
+        assert select_parent.value == folder.id
+
+        # Cancel
+        await pilot.press("escape")
+
+
+@pytest.mark.asyncio
+async def test_add_and_move_blank_selection_constraints(session: Session) -> None:
+    """Verify select validation and blank selection constraints in dialogs."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Workspace One", node_kind="workspace"))
+    folder = repo.create(Node(name="Folder One", node_kind="folder", parent_id=ws.id))
+    repo.create(
+        Node(
+            name="Dir One",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=folder.id,
+        )
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Navigate to Workspace Node to start
+        ws_node = next(
+            child for child in tree.root.children if str(child.label) == "Workspace One"
+        )
+        tree.move_cursor(ws_node)
+        await pilot.pause(0.01)
+
+        # 1. Folder Add Select always has a valid UUID parent selected
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+
+        select_parent = dialog.query_one("#select-parent")
+        assert isinstance(select_parent.value, uuid.UUID)
+        await pilot.press("escape")
+
+        # 2. Directory Add Select always has a valid UUID parent selected
+        await pilot.press("a")
+        dialog = app.screen
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+
+        select_parent = dialog.query_one("#select-parent")
+        assert isinstance(select_parent.value, uuid.UUID)
+        await pilot.press("escape")
+
+        # Navigate to Folder Node
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to Folder One
+        assert str(tree.cursor_node.label) == "Folder One"
+
+        # 3. Folder Move Select always has a valid UUID parent selected
+        await pilot.press("m")
+        assert isinstance(app.screen, MoveNodeDialog)
+        move_dialog = app.screen
+        select_parent_move = move_dialog.query_one("#select-parent")
+        assert isinstance(select_parent_move.value, uuid.UUID)
+        await pilot.press("escape")
+
+        # Navigate to Dir Node
+        await pilot.press("l")  # Expand Folder
+        await pilot.press("j")  # Move to Dir One
+        assert str(tree.cursor_node.label) == "Dir One"
+
+        # 4. Directory Move Select always has a valid UUID parent selected
+        await pilot.press("m")
+        assert isinstance(app.screen, MoveNodeDialog)
+        move_dialog = app.screen
+        select_parent_move = move_dialog.query_one("#select-parent")
+        assert isinstance(select_parent_move.value, uuid.UUID)
+        await pilot.press("escape")
+
+        # Navigate back to Workspace One
+        tree.move_cursor(ws_node)
+        await pilot.pause(0.01)
+
+        # 5. Workspace Move still resolves Root to parent_id=None
+        await pilot.press("m")
+        assert isinstance(app.screen, MoveNodeDialog)
+        move_dialog = app.screen
+        select_parent_move = move_dialog.query_one("#select-parent")
+        # Submit to resolve to None safely
+        move_dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
+async def test_no_valid_add_parent_disables_or_blocks_creation(
+    session: Session,
+) -> None:
+    """Verify that when no valid parent exists, create button is disabled."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # 1. Open add node dialog
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+
+        # Switch to Folder Node Type (no workspaces exist in DB)
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+
+        select_parent = dialog.query_one("#select-parent")
+        create_btn = dialog.query_one("#btn-create")
+
+        # Both Select and Create Button must be disabled
+        assert select_parent.disabled is True
+        assert create_btn.disabled is True
+
+        await pilot.press("escape")
+
+
+def test_sentinel_compatibility_scenarios(monkeypatch) -> None:
+    """Verify resolve_optional_uuid with simulated configurations."""
+    import pathtree.ui.compat as compat
+
+    missing = compat._MISSING
+    test_uuid = uuid.uuid4()
+
+    dummy_blank = object()
+    dummy_null = object()
+
+    # Scenario 1: Both BLANK and NULL available
+    monkeypatch.setattr(compat, "SELECT_BLANK", dummy_blank)
+    monkeypatch.setattr(compat, "SELECT_NULL", dummy_null)
+    assert compat.resolve_optional_uuid(dummy_blank) is None
+    assert compat.resolve_optional_uuid(dummy_null) is None
+    assert compat.resolve_optional_uuid(test_uuid) == test_uuid
+    assert compat.resolve_optional_uuid(None) is None
+    assert compat.resolve_optional_uuid("unknown") is None
+
+    # Scenario 2: Only NULL available
+    monkeypatch.setattr(compat, "SELECT_BLANK", missing)
+    monkeypatch.setattr(compat, "SELECT_NULL", dummy_null)
+    assert compat.resolve_optional_uuid(dummy_blank) is None  # falls through
+    assert compat.resolve_optional_uuid(dummy_null) is None
+    assert compat.resolve_optional_uuid(test_uuid) == test_uuid
+
+    # Scenario 3: Only BLANK available
+    monkeypatch.setattr(compat, "SELECT_BLANK", dummy_blank)
+    monkeypatch.setattr(compat, "SELECT_NULL", missing)
+    assert compat.resolve_optional_uuid(dummy_blank) is None
+    assert compat.resolve_optional_uuid(dummy_null) is None  # falls through
+    assert compat.resolve_optional_uuid(test_uuid) == test_uuid
+
+
+@pytest.mark.asyncio
+async def test_expansion_state_preservation_detailed(session: Session) -> None:
+    """Verify detailed tree expansion state preservation."""
+    repo = NodeRepository(session)
+    # Duplicate labels "Coding" in different branches to verify restore by UUID
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+    coding1 = repo.create(Node(name="Coding", node_kind="folder", parent_id=ws1.id))
+    repo.create(Node(name="Python1", node_kind="folder", parent_id=coding1.id))
+    # OtherFolder under WS1 to ensure WS1 remains non-empty after Coding is moved
+    repo.create(Node(name="OtherFolder", node_kind="folder", parent_id=ws1.id))
+
+    ws2 = repo.create(Node(name="WS2", node_kind="workspace", sort_order=2))
+    coding2 = repo.create(Node(name="Coding", node_kind="folder", parent_id=ws2.id))
+    repo.create(Node(name="Python2", node_kind="folder", parent_id=coding2.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Expand WS1 -> Coding, leaving WS2 -> Coding collapsed
+        # Find WS1 node in tree
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        tree.move_cursor(ws1_tn)
+        await pilot.pause(0.01)
+        await pilot.press("l")  # Expand WS1
+        await pilot.press("j")  # Move to first Coding
+        await pilot.press("l")  # Expand Coding 1
+        await pilot.pause(0.01)
+
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        coding1_tn = ws1_tn.children[0]
+        assert ws1_tn.is_expanded is True
+        assert coding1_tn.is_expanded is True
+
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        assert ws2_tn.is_expanded is False
+
+        # --- 1. Expanded branches remain expanded after Edit ---
+        await pilot.press("e")  # Edit Coding 1
+        dialog = app.screen
+        dialog.query_one("#input-name").value = "Coding Edited"
+        dialog.action_submit()
+        await pilot.pause(0.01)
+
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        coding1_tn = ws1_tn.children[0]
+        assert ws1_tn.is_expanded is True
+        assert coding1_tn.is_expanded is True
+        assert str(coding1_tn.label) == "Coding Edited"
+
+        # --- 2. Expanded unrelated Workspace remains expanded after Move ---
+        # WS2 (collapsed) will be moved or ws1 (expanded) remains expanded
+        # Let's add a folder to WS2, expand WS2, then move coding1 to WS2
+        # WS1 remains expanded
+        node_service.move_node(coding1.id, ws2.id)
+        app.screen.refresh_tree(selected_node_id=coding1.id)
+        await pilot.pause(0.01)
+
+        ws1_tn = next(child for child in tree.root.children if child.data == ws1.id)
+        assert ws1_tn.is_expanded is True  # WS1 remains expanded
+
+        # --- 3. Expanded parent remains expanded after deleting a child ---
+        # Expand WS2
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        tree.move_cursor(ws2_tn)
+        await pilot.pause(0.01)
+        await pilot.press("l")  # Expand WS2
+        await pilot.pause(0.01)
+
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        assert ws2_tn.is_expanded is True
+
+        # Delete one of WS2's children
+        child_to_delete = ws2_tn.children[1]  # coding2
+        node_service.delete_node(child_to_delete.data, recursive=True)
+        app.screen.refresh_tree()
+        await pilot.pause(0.01)
+
+        ws2_tn = next(child for child in tree.root.children if child.data == ws2.id)
+        assert (
+            ws2_tn.is_expanded is True
+        )  # Parent WS2 remains expanded after deleting a child
+
+
+@pytest.mark.asyncio
+async def test_search_mutation_query_preservation(session: Session) -> None:
+    """Verify mutation during active search preserves the query."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Workspace Node", node_kind="workspace"))
+    folder = repo.create(Node(name="Target Node", node_kind="folder", parent_id=ws.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Start search matching 'Target'
+        await pilot.press("/")
+        for char in "target":
+            await pilot.press(char)
+        await pilot.pause(0.01)
+
+        search_input = app.screen.query_one("#search-input")
+        assert search_input.value == "target"
+
+        # Mutate the node (edit it)
+        node_service.update_node(folder.id, name="Target Node Edited")
+        app.screen.refresh_tree(selected_node_id=folder.id)
+        await pilot.pause(0.01)
+
+        # Search query is preserved
+        assert search_input.value == "target"
+
+
+@pytest.mark.asyncio
+async def test_multiple_root_workspaces(session: Session) -> None:
+    """Verify separate root workspaces with deterministic order."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="Test", node_kind="workspace", sort_order=1))
+    coding = repo.create(Node(name="Coding", node_kind="folder", parent_id=ws1.id))
+    repo.create(Node(name="Python", node_kind="folder", parent_id=coding.id))
+
+    ws2 = repo.create(Node(name="Blender", node_kind="workspace", sort_order=2))
+    repo.create(Node(name="Assets", node_kind="folder", parent_id=ws2.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+        assert len(tree.root.children) == 2
+
+        # Verify Test and Blender are separate root-level nodes in correct order
+        assert str(tree.root.children[0].label) == "Test"
+        assert str(tree.root.children[1].label) == "Blender"
+
+        # Blender is NOT nested under Test
+        assert len(tree.root.children[0].children) == 1
+        assert str(tree.root.children[0].children[0].label) == "Coding"
+
+
+@pytest.mark.asyncio
+async def test_expansion_state_preservation(session: Session) -> None:
+    """Verify tree expansion state is preserved across CRUD operations."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="Test", node_kind="workspace", sort_order=1))
+    coding = repo.create(Node(name="Coding", node_kind="folder", parent_id=ws1.id))
+    repo.create(Node(name="Python", node_kind="folder", parent_id=coding.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Expand both WS and Folder
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to coding
+        await pilot.press("l")  # Expand Folder
+        await pilot.pause(0.01)
+
+        ws_tree_node = tree.root.children[0]
+        coding_tree_node = ws_tree_node.children[0]
+        assert ws_tree_node.is_expanded is True
+        assert coding_tree_node.is_expanded is True
+
+        # Perform Add operation
+        await pilot.press("a")
+        dialog = app.screen
+        dialog.query_one("#input-name").value = "New WS"
+        dialog.action_submit()
+        await pilot.pause(0.01)
+
+        # Verify expansion remains preserved by finding nodes by label
+        ws_tree_node = next(
+            child for child in tree.root.children if str(child.label) == "Test"
+        )
+        coding_tree_node = next(
+            child for child in ws_tree_node.children if str(child.label) == "Coding"
+        )
+        assert ws_tree_node.is_expanded is True
+        assert coding_tree_node.is_expanded is True
+
+
+@pytest.mark.asyncio
+async def test_expansion_state_during_search(session: Session) -> None:
+    """Verify distinct search-based expansion vs persistent user expansion state."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Workspace Node", node_kind="workspace"))
+    folder = repo.create(Node(name="Folder Node", node_kind="folder", parent_id=ws.id))
+    repo.create(Node(name="Target Node", node_kind="folder", parent_id=folder.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+        ws_tree_node = tree.root.children[0]
+        folder_tree_node = ws_tree_node.children[0]
+
+        # Initially, not expanded by the user
+        assert ws_tree_node.is_expanded is False
+        assert folder_tree_node.is_expanded is False
+
+        # Start search matching 'Target'
+        await pilot.press("/")
+        for char in "target":
+            await pilot.press(char)
+        await pilot.pause(0.01)
+
+        # matching expands matching ancestor chains
+        ws_tree_node = tree.root.children[0]
+        folder_tree_node = ws_tree_node.children[0]
+        assert ws_tree_node.is_expanded is True
+        assert folder_tree_node.is_expanded is True
+
+        # Clear search restores the pre-search expansion state (False)
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+
+        ws_tree_node = tree.root.children[0]
+        folder_tree_node = ws_tree_node.children[0]
+        assert ws_tree_node.is_expanded is False
+        assert folder_tree_node.is_expanded is False
+
+
+def test_resolve_parent_id_sentinels() -> None:
+    """Verify resolve_optional_uuid covers blank sentinels explicitly."""
+    from textual.widgets import Select
+
+    from pathtree.ui.compat import resolve_optional_uuid
+
+    test_uuid = uuid.uuid4()
+
+    sel_blank = getattr(Select, "BLANK", None)
+    sel_null = getattr(Select, "NULL", None)
+
+    if sel_blank is not None:
+        assert resolve_optional_uuid(sel_blank) is None
+    if sel_null is not None:
+        assert resolve_optional_uuid(sel_null) is None
+    assert resolve_optional_uuid(None) is None
+    assert resolve_optional_uuid(test_uuid) == test_uuid
+    assert resolve_optional_uuid("not-a-uuid") is None
+
+
+@pytest.mark.asyncio
+async def test_add_dialog_radio_set_switching(session: Session) -> None:
+    """Verify dialog state and default parent restoration when switching."""
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="Workspace Node", node_kind="workspace"))
+    folder = repo.create(Node(name="Folder Node", node_kind="folder", parent_id=ws.id))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+        # Expand and navigate to Folder Node
+        ws_node = next(
+            child
+            for child in tree.root.children
+            if str(child.label) == "Workspace Node"
+        )
+        tree.move_cursor(ws_node)
+        await pilot.pause(0.01)
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Go to Folder Node
+
+        # Open add dialog
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+
+        # Default Workspace -> parent is hidden and blank
+        select_parent = dialog.query_one("#select-parent")
+        assert select_parent.disabled is True
+
+        # Switch to Folder Node Type via clicking
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+        # Switching Workspace -> Folder restores valid parent options.
+        assert select_parent.disabled is False
+        assert select_parent.value == folder.id
+
+        # Switch back to Workspace
+        await pilot.click("#radio-workspace")
+        await pilot.pause(0.01)
+        assert select_parent.disabled is True
+
+        # Cancel
+        await pilot.press("escape")

@@ -55,6 +55,7 @@ class MainScreen(Screen[None]):
         self._last_query: str = ""
         self._last_selected_node_id: uuid.UUID | None = None
         self._pre_search_selected_node_id: uuid.UUID | None = None
+        self._pre_search_expanded_node_ids: set[uuid.UUID] | None = None
         self._db_is_empty: bool = False
 
     def compose(self) -> ComposeResult:
@@ -164,6 +165,9 @@ class MainScreen(Screen[None]):
         tree = self.query_one("#tree-view", NodeTreeView)
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
 
+        # Capture expanded node IDs before rebuilding
+        expanded_node_ids = tree.get_expanded_node_ids()
+
         # Update cached empty database status
         try:
             root_nodes = self.node_service.load_root_nodes()
@@ -209,6 +213,7 @@ class MainScreen(Screen[None]):
             filtered_nodes,
             selected_node_id=target_id,
             expand_all=is_now_non_empty,
+            expanded_node_ids=expanded_node_ids,
         )
 
         if not filtered_nodes and is_now_non_empty:
@@ -359,17 +364,27 @@ class MainScreen(Screen[None]):
         tree = self.query_one("#tree-view", NodeTreeView)
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
 
+        is_now_non_empty = bool(query.strip())
+
+        # Capture pre-search selection and expansion state if transitioning
+        # from empty to non-empty
+        if is_now_non_empty and self._pre_search_selected_node_id is None:
+            self._pre_search_selected_node_id = self._last_selected_node_id
+            self._pre_search_expanded_node_ids = tree.get_expanded_node_ids()
+
+        # Determine which expansion state to apply
+        if not is_now_non_empty and self._pre_search_expanded_node_ids is not None:
+            expanded_node_ids = self._pre_search_expanded_node_ids
+            self._pre_search_expanded_node_ids = None
+        else:
+            expanded_node_ids = tree.get_expanded_node_ids()
+
         # Get search results from service
         try:
             filtered_nodes = self.node_service.search_nodes(query=query)
         except NodeServiceError as e:
             details_panel.update_error(str(e))
             return
-
-        is_now_non_empty = bool(query.strip())
-        # Capture pre-search selection if transitioning from empty to non-empty
-        if is_now_non_empty and self._pre_search_selected_node_id is None:
-            self._pre_search_selected_node_id = self._last_selected_node_id
 
         # Determine which node ID we want to restore/select
         restore_id = self._last_selected_node_id
@@ -383,6 +398,7 @@ class MainScreen(Screen[None]):
             filtered_nodes,
             selected_node_id=restore_id,
             expand_all=is_now_non_empty,
+            expanded_node_ids=expanded_node_ids,
         )
 
         # If no nodes are returned under a query (search returns empty)

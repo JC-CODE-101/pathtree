@@ -16,6 +16,7 @@ from textual.widgets import (
 )
 
 from pathtree.services.node_service import NodeService, NodeServiceError
+from pathtree.ui.compat import resolve_optional_uuid
 
 
 class AddNodeDialog(ModalScreen[uuid.UUID | None]):
@@ -119,12 +120,12 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 yield Label("Icon", classes="field-label")
                 yield Input(placeholder="Enter icon (optional)...", id="input-icon")
 
-            with Vertical(classes="field-container"):
+            with Vertical(classes="field-container", id="parent-field-container"):
                 yield Label("Parent", classes="field-label")
                 yield Select(
                     parent_choices,
                     value=self.default_parent_id,
-                    allow_blank=True,
+                    allow_blank=False,
                     id="select-parent",
                 )
 
@@ -140,29 +141,84 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 yield Button("Create", variant="primary", id="btn-create")
 
     def on_mount(self) -> None:
-        # Hide temporary checkbox and path input by default
-        # because Workspace is selected
-        self.query_one("#checkbox-temporary", Checkbox).display = False
-        self.query_one("#path-field-container", Vertical).display = False
+        self.update_parent_choices()
 
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        # Update visibility of fields based on chosen type
         radio_id = event.pressed.id
-        path_container = self.query_one("#path-field-container", Vertical)
-        temp_checkbox = self.query_one("#checkbox-temporary", Checkbox)
-
         if radio_id == "radio-workspace":
             self.selected_type = "workspace"
-            path_container.display = False
-            temp_checkbox.display = False
         elif radio_id == "radio-folder":
             self.selected_type = "folder"
-            path_container.display = False
-            temp_checkbox.display = False
         elif radio_id == "radio-directory":
             self.selected_type = "directory"
-            path_container.display = True
-            temp_checkbox.display = True
+        self.update_parent_choices()
+
+    def update_parent_choices(self) -> None:
+        """Update parent choices in the select dropdown based on chosen type."""
+        path_container = self.query_one("#path-field-container", Vertical)
+        temp_checkbox = self.query_one("#checkbox-temporary", Checkbox)
+        parent_container = self.query_one("#parent-field-container", Vertical)
+        select_parent = self.query_one("#select-parent", Select)
+        warning_area = self.query_one("#warning-area", Static)
+
+        create_btn = self.query_one("#btn-create", Button)
+
+        if self.selected_type == "workspace":
+            path_container.display = False
+            temp_checkbox.display = False
+            parent_container.display = False
+            select_parent.disabled = True
+            warning_area.update("")
+            create_btn.disabled = False
+            return
+
+        # Folder or Directory:
+        path_container.display = self.selected_type == "directory"
+        temp_checkbox.display = self.selected_type == "directory"
+        parent_container.display = True
+        select_parent.disabled = False
+
+        # Retrieve all parent choices from node service
+        all_choices = self.node_service.get_parent_choices()
+        # Filter choices: only Workspace and Folder nodes (excluding Root,
+        # i.e. None value, and Directory resources)
+        valid_choices = []
+        for label, val_id in all_choices:
+            if val_id is not None:
+                parent_node = self.node_service.get_node(val_id)
+                if parent_node is not None and parent_node.node_kind in (
+                    "workspace",
+                    "folder",
+                ):
+                    valid_choices.append((label, val_id))
+
+        if not valid_choices:
+            select_parent.disabled = True
+            create_btn.disabled = True
+            warning_area.update(
+                f"No valid parent Workspaces or Folders available to create a "
+                f"{self.selected_type.capitalize()}. Please create a Workspace first."
+            )
+            return
+
+        select_parent.set_options(valid_choices)
+        create_btn.disabled = False
+        warning_area.update("")
+
+        # Derives the default parent only when valid for chosen type
+        valid = False
+        if self.default_parent_id is not None:
+            parent_node = self.node_service.get_node(self.default_parent_id)
+            if parent_node is not None and parent_node.node_kind in (
+                "workspace",
+                "folder",
+            ):
+                valid = True
+
+        if valid:
+            select_parent.value = self.default_parent_id
+        else:
+            select_parent.value = valid_choices[0][1]
 
     def on_input_changed(self, event: Input.Changed) -> None:
         # We handle real-time path validation warning for Directory path
@@ -191,7 +247,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         icon = self.query_one("#input-icon", Input).value or None
 
         parent_val = self.query_one("#select-parent", Select).value
-        parent_id = parent_val if isinstance(parent_val, uuid.UUID) else None
+        parent_id = resolve_optional_uuid(parent_val)
 
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
@@ -200,12 +256,19 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             resource_type = None
             path = None
             is_temporary = False
+            parent_id = None  # Always force Workspace to be at root (None)
         elif self.selected_type == "folder":
+            if parent_id is None:
+                status_area.update("A valid parent Workspace or Folder is required.")
+                return
             node_kind = "folder"
             resource_type = None
             path = None
             is_temporary = False
         else:  # directory
+            if parent_id is None:
+                status_area.update("A valid parent Workspace or Folder is required.")
+                return
             node_kind = "resource"
             resource_type = "directory"
             path = self.query_one("#input-path", Input).value or None

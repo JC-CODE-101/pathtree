@@ -440,12 +440,16 @@ def test_creation_invalid_parent_rejections(node_service: NodeService) -> None:
     # Nonexistent parent
     with pytest.raises(ParentNotFoundError):
         node_service.create_node(
-            name="Test", node_kind="workspace", parent_id=uuid.uuid4()
+            name="Test", node_kind="folder", parent_id=uuid.uuid4()
         )
 
     # Resource parent (forbidden)
+    ws = node_service.create_node(name="WS", node_kind="workspace")
     res = node_service.create_node(
-        name="Resource Parent", node_kind="resource", resource_type="directory"
+        name="Resource Parent",
+        node_kind="resource",
+        resource_type="directory",
+        parent_id=ws.id,
     )
     with pytest.raises(InvalidParentKindError):
         node_service.create_node(name="Test", node_kind="folder", parent_id=res.id)
@@ -456,13 +460,10 @@ def test_creation_sibling_name_uniqueness(node_service: NodeService) -> None:
     from pathtree.services.node_service import DuplicateSiblingNameError
 
     # Root duplicates
-    node_service.create_node(name="Assets", node_kind="workspace")
+    ws = node_service.create_node(name="Assets", node_kind="workspace")
 
     with pytest.raises(DuplicateSiblingNameError):
         node_service.create_node(name=" assets ", node_kind="workspace")
-
-    with pytest.raises(DuplicateSiblingNameError):
-        node_service.create_node(name="ASSETS", node_kind="folder")
 
     # Sibling duplicates under a workspace
     ws = node_service.create_node(name="Projects", node_kind="workspace")
@@ -519,9 +520,10 @@ def test_update_temporary_and_permanent_rules(node_service: NodeService) -> None
     """Test temporary/permanent promotion and demotion checks."""
     from pathtree.services.node_service import ValidationError
 
+    ws = node_service.create_node(name="WS", node_kind="workspace")
     # Temporary node can be promoted to permanent
     temp_node = node_service.create_node(
-        name="Temp", node_kind="resource", is_temporary=True
+        name="Temp", node_kind="resource", is_temporary=True, parent_id=ws.id
     )
     assert temp_node.is_temporary is True
 
@@ -530,7 +532,7 @@ def test_update_temporary_and_permanent_rules(node_service: NodeService) -> None
 
     # Permanent node cannot be demoted to temporary
     perm_node = node_service.create_node(
-        name="Perm", node_kind="resource", is_temporary=False
+        name="Perm", node_kind="resource", is_temporary=False, parent_id=ws.id
     )
     with pytest.raises(ValidationError):
         node_service.update_node(perm_node.id, is_temporary=True)
@@ -566,6 +568,7 @@ def test_move_node_scenarios(node_service: NodeService) -> None:
         DuplicateSiblingNameError,
         InvalidParentKindError,
         SelfParentError,
+        ValidationError,
     )
 
     # Setup tree
@@ -579,9 +582,9 @@ def test_move_node_scenarios(node_service: NodeService) -> None:
     )
     res = node_service.create_node(name="Res", node_kind="resource", parent_id=ws1.id)
 
-    # Move to root (parent_id = None)
-    moved_root = node_service.move_node(folder.id, None)
-    assert moved_root.parent_id is None
+    # Move to root (parent_id = None) - rejected for folders
+    with pytest.raises(ValidationError, match="cannot be created under Root"):
+        node_service.move_node(folder.id, None)
 
     # Move beneath workspace
     moved_ws = node_service.move_node(folder.id, ws2.id)
@@ -635,7 +638,7 @@ def test_recursive_deletion_scenarios(node_service: NodeService) -> None:
     assert node_service.count_descendants(folder.id) == 2
 
     # Leaf deletion (non-recursive)
-    leaf = node_service.create_node(name="Leaf", node_kind="folder")
+    leaf = node_service.create_node(name="Leaf", node_kind="folder", parent_id=ws.id)
     assert node_service.delete_node(leaf.id, recursive=False) is True
     assert node_service.get_node(leaf.id) is None
 
@@ -778,7 +781,9 @@ def test_update_node_mutation_safety_regression(
         node_service.update_node(ws.id, is_favorite=True, path="/etc")
 
     # 3. Perform another successful operation that commits
-    dummy_f = node_service.create_node(name="Other Folder", node_kind="folder")
+    dummy_f = node_service.create_node(
+        name="Other Folder", node_kind="folder", parent_id=ws.id
+    )
     node_service.update_node(dummy_f.id, description="Committed change")
 
     # 4. Reload original node using a fresh session to check state
@@ -839,11 +844,14 @@ def test_parent_kind_allowlist_create_and_move_rejections(
     # create_node below malformed parent must be rejected
     with pytest.raises(InvalidParentKindError):
         node_service.create_node(
-            name="Child Node", node_kind="workspace", parent_id=malformed_parent.id
+            name="Child Node", node_kind="folder", parent_id=malformed_parent.id
         )
 
     # move_node below malformed parent must be rejected
-    folder = node_service.create_node(name="Valid Folder", node_kind="folder")
+    ws = node_service.create_node(name="WS", node_kind="workspace")
+    folder = node_service.create_node(
+        name="Valid Folder", node_kind="folder", parent_id=ws.id
+    )
     orig_parent_id = folder.parent_id
 
     with pytest.raises(InvalidParentKindError):
@@ -897,3 +905,132 @@ def test_service_translates_repository_error(node_service: NodeService) -> None:
         assert "Database persistence violated integrity" in str(excinfo.value)
         assert "Simulated integrity failure" in str(excinfo.value)
         assert "[SQL: INSERT INTO nodes]" not in str(excinfo.value)
+
+
+def test_hierarchy_rules_create(node_service: NodeService) -> None:
+    """Verify strict hierarchy rules on node creation."""
+    from pathtree.services.node_service import ValidationError
+
+    # - Workspace with parent_id=None succeeds.
+    ws1 = node_service.create_node(name="Workspace One", node_kind="workspace")
+    assert ws1.parent_id is None
+
+    # - Workspace beneath Workspace is rejected.
+    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+        node_service.create_node(
+            name="WS Under WS", node_kind="workspace", parent_id=ws1.id
+        )
+
+    # - Folder beneath Workspace succeeds.
+    f1 = node_service.create_node(
+        name="Folder One", node_kind="folder", parent_id=ws1.id
+    )
+    assert f1.parent_id == ws1.id
+
+    # - Workspace beneath Folder is rejected.
+    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+        node_service.create_node(
+            name="WS Under Folder", node_kind="workspace", parent_id=f1.id
+        )
+
+    # - Directory beneath Workspace succeeds.
+    dir1 = node_service.create_node(
+        name="Dir One",
+        node_kind="resource",
+        resource_type="directory",
+        parent_id=ws1.id,
+    )
+    assert dir1.parent_id == ws1.id
+
+    # - Workspace beneath Directory is rejected.
+    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+        node_service.create_node(
+            name="WS Under Dir", node_kind="workspace", parent_id=dir1.id
+        )
+
+    # - Folder beneath Folder succeeds.
+    f2 = node_service.create_node(
+        name="Folder Two", node_kind="folder", parent_id=f1.id
+    )
+    assert f2.parent_id == f1.id
+
+    # - Folder at Root is rejected.
+    with pytest.raises(ValidationError, match="Folder cannot be created under Root"):
+        node_service.create_node(
+            name="Folder Under Root", node_kind="folder", parent_id=None
+        )
+
+    # - Folder beneath Directory is rejected.
+    from pathtree.services.node_service import InvalidParentKindError
+
+    with pytest.raises(InvalidParentKindError):
+        node_service.create_node(
+            name="Folder Under Dir", node_kind="folder", parent_id=dir1.id
+        )
+
+    # - Directory beneath Folder succeeds.
+    dir2 = node_service.create_node(
+        name="Dir Two", node_kind="resource", resource_type="directory", parent_id=f1.id
+    )
+    assert dir2.parent_id == f1.id
+
+    # - Directory at Root is rejected.
+    with pytest.raises(ValidationError, match="Resource cannot be created under Root"):
+        node_service.create_node(
+            name="Dir Under Root",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=None,
+        )
+
+    # - Directory beneath Directory is rejected.
+    with pytest.raises(InvalidParentKindError):
+        node_service.create_node(
+            name="Dir Under Dir",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=dir1.id,
+        )
+
+
+def test_hierarchy_rules_move(node_service: NodeService) -> None:
+    """Verify strict hierarchy rules on move_node."""
+    from pathtree.services.node_service import InvalidParentKindError, ValidationError
+
+    ws1 = node_service.create_node(name="WS1", node_kind="workspace")
+    ws2 = node_service.create_node(name="WS2", node_kind="workspace")
+    f1 = node_service.create_node(name="Folder1", node_kind="folder", parent_id=ws1.id)
+    dir1 = node_service.create_node(
+        name="Dir1", node_kind="resource", resource_type="directory", parent_id=ws1.id
+    )
+
+    # - Workspace beneath Workspace is rejected on move.
+    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+        node_service.move_node(ws1.id, ws2.id)
+
+    # - Workspace beneath Folder is rejected on move.
+    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+        node_service.move_node(ws1.id, f1.id)
+
+    # - Workspace beneath Directory is rejected on move.
+    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+        node_service.move_node(ws1.id, dir1.id)
+
+    # - Folder at Root is rejected on move.
+    with pytest.raises(ValidationError, match="cannot be created under Root"):
+        node_service.move_node(f1.id, None)
+
+    # - Folder beneath Directory is rejected on move.
+    with pytest.raises(InvalidParentKindError):
+        node_service.move_node(f1.id, dir1.id)
+
+    # - Directory at Root is rejected on move.
+    with pytest.raises(ValidationError, match="cannot be created under Root"):
+        node_service.move_node(dir1.id, None)
+
+    # - Directory beneath Directory is rejected on move.
+    dir2 = node_service.create_node(
+        name="Dir2", node_kind="resource", resource_type="directory", parent_id=ws1.id
+    )
+    with pytest.raises(InvalidParentKindError):
+        node_service.move_node(dir1.id, dir2.id)

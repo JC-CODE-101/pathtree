@@ -57,11 +57,28 @@ class NodeTreeView(Tree[uuid.UUID]):
         self.load_error: str | None = None
         self.populate_tree()
 
+    def get_expanded_node_ids(self) -> set[uuid.UUID]:
+        """Capture the IDs of expanded visible nodes recursively using UUIDs.
+
+        Does not use labels.
+        """
+        expanded_ids = set()
+
+        def traverse(node: TextualTreeNode[uuid.UUID]) -> None:
+            if node.is_expanded and node.data is not None:
+                expanded_ids.add(node.data)
+            for child in node.children:
+                traverse(child)
+
+        traverse(self.root)
+        return expanded_ids
+
     def load_tree(
         self,
         tree_nodes: list[TreeNode],
         selected_node_id: uuid.UUID | None = None,
         expand_all: bool = False,
+        expanded_node_ids: set[uuid.UUID] | None = None,
     ) -> None:
         """Load the tree with a specific TreeNode hierarchy.
 
@@ -78,10 +95,14 @@ class NodeTreeView(Tree[uuid.UUID]):
         ) -> None:
             db_node = app_tree_node.node
             children = app_tree_node.children
+            should_expand = expand_all
+            if expanded_node_ids is not None and db_node.id in expanded_node_ids:
+                should_expand = True
+
             if children:
-                # Set expand to expand_all when query is active
+                # Set expand to expand_all or if in expanded_node_ids
                 tree_node = parent_tree_node.add(
-                    db_node.name, data=db_node.id, expand=expand_all
+                    db_node.name, data=db_node.id, expand=should_expand
                 )
                 node_map[db_node.id] = tree_node
                 for child in children:
