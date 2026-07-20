@@ -26,6 +26,22 @@ class PathAutocompleteInput(Input):
             self.parent.hide_suggestions()
 
 
+class PathAutocompleteOptionList(OptionList):
+    """Custom OptionList routing selections back to its parent."""
+
+    def __init__(
+        self, *args, parent_widget: "PathAutocomplete" = None, **kwargs
+    ) -> None:
+        """Initialize with a reference to the parent PathAutocomplete widget."""
+        super().__init__(*args, **kwargs)
+        self.parent_widget = parent_widget
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        """Forward option selection to the parent PathAutocomplete widget."""
+        if self.parent_widget and not event.option.disabled:
+            self.parent_widget.accept_suggestion(str(event.option.prompt))
+
+
 class PathAutocomplete(Widget):
     """A reusable path autocomplete widget with directory suggestions."""
 
@@ -41,7 +57,7 @@ class PathAutocomplete(Widget):
         height: 100%;
     }
 
-    PathAutocomplete .path-suggestions-list {
+    .path-suggestions-list {
         display: none;
         position: absolute;
         offset: 0 3;
@@ -49,6 +65,7 @@ class PathAutocomplete(Widget):
         max-height: 8;
         background: $panel;
         border: solid $accent;
+        layer: overlay;
     }
     """
 
@@ -68,7 +85,9 @@ class PathAutocomplete(Widget):
         self.input_id = id or "input-path"
         self.is_suggestions_visible = False
         self._last_accepted_value = None
-        self.option_list = OptionList(classes="path-suggestions-list")
+        self.option_list = PathAutocompleteOptionList(
+            classes="path-suggestions-list", parent_widget=self
+        )
 
     def compose(self) -> ComposeResult:
         """Compose the wrapped Input and suggestions OptionList."""
@@ -78,11 +97,44 @@ class PathAutocomplete(Widget):
             id=self.input_id,
             classes="path-autocomplete-input",
         )
-        yield self.option_list
 
     def on_mount(self) -> None:
-        """Initialize the suggestion list state."""
+        """Mount the OptionList dynamically to the dialog container or screen."""
+        try:
+            container = self.screen.query_one("#dialog-container")
+            container.mount(self.option_list)
+        except Exception:
+            self.screen.mount(self.option_list)
         self.hide_suggestions()
+
+    def on_unmount(self) -> None:
+        """Clean up by removing the OptionList from its parent."""
+        if self.option_list.parent:
+            self.option_list.remove()
+
+    def update_suggestions_position(self) -> None:
+        """Position the OptionList overlay directly below the input field."""
+        try:
+            input_widget = self.query_one(f"#{self.input_id}", Input)
+            parent = self.option_list.parent
+            if parent is None:
+                return
+
+            # Both regions are screen-relative in Textual
+            input_reg = input_widget.region
+            parent_reg = parent.region
+
+            x = input_reg.x - parent_reg.x
+            y = (input_reg.y - parent_reg.y) + input_reg.height
+
+            self.option_list.styles.position = "absolute"
+            self.option_list.styles.offset = (x, y)
+            if input_reg.width > 0:
+                self.option_list.styles.width = input_reg.width
+            else:
+                self.option_list.styles.width = "100%"
+        except Exception:
+            pass
 
     def handle_input_key(self, event: events.Key) -> bool:
         """Handle key interception from the inner Input widget.
@@ -178,6 +230,7 @@ class PathAutocomplete(Widget):
 
     def show_suggestions(self) -> None:
         """Display the suggestion list overlay."""
+        self.update_suggestions_position()
         self.option_list.display = True
         self.is_suggestions_visible = True
 
@@ -206,11 +259,6 @@ class PathAutocomplete(Widget):
     def on_blur(self, event: events.Blur) -> None:
         """Hide suggestions when focus leaves the widget."""
         self.hide_suggestions()
-
-    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        """Handle mouse clicks on suggestion items."""
-        if not event.option.disabled:
-            self.accept_suggestion(str(event.option.prompt))
 
     def update_suggestions(self, value: str) -> None:
         """Scan parent directory and update the suggestions list."""

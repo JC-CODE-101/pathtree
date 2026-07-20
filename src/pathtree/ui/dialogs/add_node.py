@@ -35,6 +35,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         background: $panel;
         border: thick $accent;
         padding: 1 2;
+        layers: base overlay;
     }
 
     .title {
@@ -88,7 +89,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         height: 100%;
     }
 
-    PathAutocomplete .path-suggestions-list {
+    .path-suggestions-list {
         display: none;
         position: absolute;
         offset: 0 3;
@@ -96,6 +97,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         max-height: 8;
         background: $panel;
         border: solid $accent;
+        layer: overlay;
     }
     """
 

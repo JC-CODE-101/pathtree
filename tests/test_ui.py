@@ -1090,6 +1090,153 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+def get_screen_y(widget) -> int:
+    """Helper to calculate the absolute screen Y coordinate of a widget."""
+    y = 0
+    curr = widget
+    while curr is not None and curr != curr.screen:
+        y += curr.region.y
+        curr = curr.parent
+    return y
+
+
+@pytest.mark.asyncio
+async def test_add_node_dialog_autocomplete_overlay_properties(
+    session: Session, tmp_path: Path
+) -> None:
+    """Rigorous rendering and layering test for PathAutocomplete in AddNodeDialog."""
+    node_service = NodeService(NodeRepository(session))
+    node_service.create_node(name="WS", node_kind="workspace")
+    (tmp_path / "blocks").mkdir()
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Trigger dialog
+        await pilot.press("a")
+        dialog = app.screen
+        assert isinstance(dialog, AddNodeDialog)
+
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+
+        p_widget = dialog.query_one("#input-path-wrapper", PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        input_path.focus()
+
+        # Type partial path
+        input_path.value = str(tmp_path) + "/b"
+        await pilot.pause(0.05)
+
+        # Locate OptionList
+        option_list = p_widget.option_list
+        assert option_list.display is True
+        assert option_list.visible is True
+        assert option_list.region.width > 0
+        assert option_list.region.height > 0
+        assert option_list.is_on_screen is True
+
+        # Assert overlay layer
+        assert option_list.styles.layer == "overlay"
+
+        # Assert region.y begins below the Path input (using screen-relative Y)
+        assert option_list.region.y >= input_path.region.bottom
+
+        # Verify vertical overlap: OptionList's y range overlaps description field
+        desc_container = dialog.query_one("#input-description").parent
+        description_label = desc_container.query_one("Label")
+        assert option_list.region.y <= description_label.region.y + 2
+        assert option_list.region.bottom > description_label.region.y + 1
+
+        # Assert Path input retains focus
+        assert app.focused is input_path
+
+        # Navigate suggestions list
+        assert option_list.highlighted == 0
+        await pilot.press("down")
+        await pilot.pause(0.01)
+        assert option_list.highlighted == 0  # only 1 match (blocks/)
+
+        # Accept visible option
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is False
+        assert input_path.value == str(tmp_path) + "/blocks/"
+
+
+@pytest.mark.asyncio
+async def test_edit_node_dialog_autocomplete_overlay_properties(
+    session: Session, tmp_path: Path
+) -> None:
+    """Rigorous rendering and layering test for PathAutocomplete in EditNodeDialog."""
+    node_service = NodeService(NodeRepository(session))
+    ws = node_service.create_node(name="WS", node_kind="workspace")
+    (tmp_path / "blocks").mkdir()
+
+    node_service.create_node(
+        name="Edit Node",
+        node_kind="resource",
+        resource_type="directory",
+        parent_id=ws.id,
+        path=str(tmp_path),
+    )
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        app.screen.query_one("#tree-view")
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to child node
+
+        # Trigger edit modal
+        await pilot.press("e")
+        dialog = app.screen
+        assert isinstance(dialog, EditNodeDialog)
+
+        p_widget = dialog.query_one("#input-path-wrapper", PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        input_path.focus()
+
+        # Change path to trigger suggestions
+        input_path.value = str(tmp_path) + "/b"
+        await pilot.pause(0.05)
+
+        # Locate OptionList
+        option_list = p_widget.option_list
+        assert option_list.display is True
+        assert option_list.visible is True
+        assert option_list.region.width > 0
+        assert option_list.region.height > 0
+        assert option_list.is_on_screen is True
+
+        # Assert overlay layer
+        assert option_list.styles.layer == "overlay"
+
+        # Assert region.y begins below the Path input (using screen-relative Y)
+        assert option_list.region.y >= input_path.region.bottom
+
+        # Assert vertical overlap: OptionList overlaps with following fields
+        desc_container = dialog.query_one("#input-description").parent
+        description_label = desc_container.query_one("Label")
+        assert option_list.region.y <= description_label.region.y + 2
+        assert option_list.region.bottom > description_label.region.y + 1
+
+        # Assert Path input retains focus
+        assert app.focused is input_path
+
+        # Accept visible option
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is False
+        assert input_path.value == str(tmp_path) + "/blocks/"
+
+
 @pytest.mark.asyncio
 async def test_add_node_dialog_visibility_regression(session: Session) -> None:
     """Verify PathAutocomplete visibility, dimensions, focus, and rendering order."""
