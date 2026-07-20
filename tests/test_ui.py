@@ -15,6 +15,7 @@ from pathtree.ui.dialogs.add_node import AddNodeDialog
 from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog
 from pathtree.ui.dialogs.edit_node import EditNodeDialog
 from pathtree.ui.dialogs.move_node import MoveNodeDialog
+from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
 @pytest.mark.asyncio
@@ -1093,31 +1094,96 @@ class AutocompleteTestApp(App[None]):
     """Simple test app to isolate PathAutocomplete testing."""
 
     def compose(self) -> ComposeResult:
-        from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
-
         yield PathAutocomplete(id="input-path")
 
 
+class DualAutocompleteApp(App[None]):
+    """Simple test app with two PathAutocomplete widgets."""
+
+    def compose(self) -> ComposeResult:
+        yield PathAutocomplete(id="path1")
+        yield PathAutocomplete(id="path2")
+
+
 @pytest.mark.asyncio
-async def test_path_autocomplete_comprehensive(tmp_path: Path, monkeypatch) -> None:
-    """Comprehensive test for PathAutocomplete widget covering all requirements."""
-    import os
+async def test_path_autocomplete_basic_typing(tmp_path: Path, monkeypatch) -> None:
+    """Test that typing generates sorted directory suggestions only."""
 
-    from textual.widgets import OptionList
-
-    from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
-
-    # Set up directories and files under tmp_path
     (tmp_path / "blocks").mkdir()
     (tmp_path / "blender").mkdir()
     (tmp_path / "docs").mkdir()
-    (tmp_path / "images").mkdir()
-    (tmp_path / "some_file.txt").touch()
+    (tmp_path / "some_file.txt").touch()  # Files should not be suggested
 
-    # Change working directory to tmp_path for relative tests
     monkeypatch.chdir(tmp_path)
 
-    # Mock tilde expansion
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        await pilot.press("b")
+        await pilot.press("l")
+        await pilot.pause(0.01)
+
+        assert widget.is_suggestions_visible is True
+        option_list = widget.option_list
+        assert option_list.option_count == 2
+        assert str(option_list.get_option_at_index(0).prompt) == "blender/"
+        assert str(option_list.get_option_at_index(1).prompt) == "blocks/"
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_navigation_keys(tmp_path: Path, monkeypatch) -> None:
+    """Test navigation with Up/Down and Ctrl+n/Ctrl+p inside PathAutocomplete."""
+    from textual.events import Key
+
+    (tmp_path / "blocks").mkdir()
+    (tmp_path / "blender").mkdir()
+
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        input_widget.value = "b"
+        await pilot.pause(0.01)
+
+        option_list = widget.option_list
+        assert option_list.highlighted == 0
+
+        # Ctrl+n
+        await pilot.press("ctrl+n")
+        assert option_list.highlighted == 1
+
+        # Ctrl+p
+        input_widget.post_message(Key("ctrl+p", None))
+        await pilot.pause(0.01)
+        assert option_list.highlighted == 0
+
+        # Down
+        await pilot.press("down")
+        assert option_list.highlighted == 1
+
+        # Up
+        await pilot.press("up")
+        assert option_list.highlighted == 0
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_relative_absolute_and_tilde(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Test relative, absolute, and tilde expansions inside PathAutocomplete."""
+    import os
+
+    (tmp_path / "blender").mkdir()
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path)))
 
     app = AutocompleteTestApp()
@@ -1127,120 +1193,336 @@ async def test_path_autocomplete_comprehensive(tmp_path: Path, monkeypatch) -> N
         input_widget.focus()
         await pilot.pause(0.01)
 
-        # 1. Typing generates suggestions (only directories, sorted)
-        await pilot.press("b")
-        await pilot.press("l")
+        # 1. Relative dot path
+        input_widget.value = "./b"
         await pilot.pause(0.01)
-
-        assert widget.is_suggestions_visible is True
-        option_list = widget.query_one("#path-suggestions-list", OptionList)
-        assert option_list.option_count == 2
-        assert str(option_list.get_option_at_index(0).prompt) == "blender/"
-        assert str(option_list.get_option_at_index(1).prompt) == "blocks/"
-        assert option_list.highlighted == 0
-
-        # 2. Ctrl+n / Ctrl+p navigation
-        await pilot.press("ctrl+n")
-        assert option_list.highlighted == 1
-        from textual.events import Key
-
-        input_widget.post_message(Key("ctrl+p", None))
-        await pilot.pause(0.01)
-        assert option_list.highlighted == 0
-
-        # 3. Up / Down navigation
-        await pilot.press("down")
-        assert option_list.highlighted == 1
-        await pilot.press("up")
-        assert option_list.highlighted == 0
-
-        # 4. Tab accepts highlighted suggestion
-        await pilot.press("tab")
-        await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is False
-        assert input_widget.value == "blender/"
-
-        # 5. Enter accepts suggestion before submit
-        input_widget.value = ""
-        await pilot.press("b")
-        await pilot.press("l")
-        await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is True
-
-        await pilot.press("enter")
-        await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is False
-        assert input_widget.value == "blender/"
-
-        # 6. Escape closes suggestions
-        input_widget.value = ""
-        await pilot.press("b")
-        await pilot.press("l")
-        await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is True
-
-        await pilot.press("escape")
-        await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is False
-        assert input_widget.value == "bl"
-
-        # 7. Relative paths
-        input_widget.value = ""
-        await pilot.press(".")
-        await pilot.press("/")
-        await pilot.press("b")
-        await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is True
+        option_list = widget.option_list
         assert str(option_list.get_option_at_index(0).prompt) == "blender/"
         await pilot.press("tab")
         await pilot.pause(0.01)
         assert input_widget.value == "./blender/"
 
-        # 8. Absolute paths
-        input_widget.value = ""
+        # 2. Absolute path
         input_widget.value = str(tmp_path) + "/b"
         await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is True
         assert str(option_list.get_option_at_index(0).prompt) == "blender/"
         await pilot.press("tab")
         await pilot.pause(0.01)
         assert input_widget.value == str(tmp_path) + "/blender/"
 
-        # 9. Tilde expansion
-        input_widget.value = ""
-        await pilot.press("~")
-        await pilot.press("/")
-        await pilot.press("b")
+        # 3. Tilde path
+        input_widget.value = "~/b"
         await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is True
         assert str(option_list.get_option_at_index(0).prompt) == "blender/"
         await pilot.press("tab")
         await pilot.pause(0.01)
         assert input_widget.value == "~/blender/"
 
-        # 10. No matches
-        input_widget.value = ""
-        await pilot.press("x")
-        await pilot.press("y")
-        await pilot.press("z")
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_validation_states(tmp_path: Path, monkeypatch) -> None:
+    """Test empty matches and nonexistent directory validation states."""
+
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
         await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is True
+
+        # 1. No matches
+        input_widget.value = "xyz"
+        await pilot.pause(0.01)
+        option_list = widget.option_list
         assert option_list.option_count == 1
         assert option_list.get_option_at_index(0).disabled is True
         assert "No matching directories" in str(
             option_list.get_option_at_index(0).prompt
         )
 
-        # 11. Nonexistent parent directory
-        input_widget.value = ""
+        # 2. Nonexistent parent directory
         input_widget.value = "nonexistent/b"
         await pilot.pause(0.01)
-        assert widget.is_suggestions_visible is True
         assert option_list.option_count == 1
         assert option_list.get_option_at_index(0).disabled is True
         assert "Directory does not exist" in str(
             option_list.get_option_at_index(0).prompt
         )
+
+
+@pytest.mark.asyncio
+async def test_dual_path_autocomplete(tmp_path: Path, monkeypatch) -> None:
+    """Verify multiple PathAutocomplete widgets on one screen operate independently."""
+    (tmp_path / "blocks").mkdir()
+    (tmp_path / "blender").mkdir()
+    (tmp_path / "other").mkdir()
+
+    monkeypatch.chdir(tmp_path)
+
+    app = DualAutocompleteApp()
+    async with app.run_test() as pilot:
+        p1 = app.screen.query_one("#path1-wrapper", PathAutocomplete)
+        p2 = app.screen.query_one("#path2-wrapper", PathAutocomplete)
+
+        input1 = p1.query_one("#path1")
+        input1.focus()
+        await pilot.press("b")
+        await pilot.pause(0.01)
+
+        # Widget 1 shows suggestions, Widget 2 is hidden
+        assert p1.is_suggestions_visible is True
+        assert p2.is_suggestions_visible is False
+
+        # Widget 2 gains focus and typed into
+        input2 = p2.query_one("#path2")
+        input2.focus()
+        await pilot.press("o")
+        await pilot.pause(0.01)
+
+        # Widget 1 is hidden because it lost focus/blurred, Widget 2 is visible
+        assert p1.is_suggestions_visible is False
+        assert p2.is_suggestions_visible is True
+
+
+@pytest.mark.asyncio
+async def test_add_node_dialog_autocomplete_enter_acceptance_and_creation(
+    session: Session, tmp_path: Path
+) -> None:
+    """Test Enter accepts autocomplete suggestions before dialog submit."""
+    node_service = NodeService(NodeRepository(session))
+    ws = node_service.create_node(name="WS", node_kind="workspace")
+
+    (tmp_path / "suggested_folder").mkdir()
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        await pilot.press("a")
+        dialog = app.screen
+        assert isinstance(dialog, AddNodeDialog)
+
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+
+        dialog.query_one("#input-name").value = "New Directory Node"
+        dialog.query_one("#select-parent").value = ws.id
+
+        p_widget = dialog.query_one("#input-path-wrapper", PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        input_path.focus()
+
+        # Input partially matching
+        input_path.value = str(tmp_path) + "/s"
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is True
+
+        # First Enter: accepts suggestion, suggestions close, dialog remains open
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is False
+        assert input_path.value == str(tmp_path) + "/suggested_folder/"
+        assert isinstance(app.screen, AddNodeDialog)
+
+        # Second Enter: submits and creates
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+
+        assert app.screen.id == "main-screen"
+        from sqlmodel import select
+
+        assert len(session.exec(select(Node)).all()) == 2
+
+
+@pytest.mark.asyncio
+async def test_edit_node_dialog_autocomplete(session: Session, tmp_path: Path) -> None:
+    """Test EditNodeDialog properly loads and supports autocomplete changes."""
+    node_service = NodeService(NodeRepository(session))
+    ws = node_service.create_node(name="WS", node_kind="workspace")
+
+    orig_dir = tmp_path / "orig_dir"
+    orig_dir.mkdir()
+    new_dir = tmp_path / "new_dir"
+    new_dir.mkdir()
+
+    node = node_service.create_node(
+        name="Edit Node",
+        node_kind="resource",
+        resource_type="directory",
+        parent_id=ws.id,
+        path=str(orig_dir),
+    )
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        app.screen.query_one("#tree-view")
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to child node
+
+        # Trigger edit modal
+        await pilot.press("e")
+        dialog = app.screen
+        assert isinstance(dialog, EditNodeDialog)
+
+        p_widget = dialog.query_one("#input-path-wrapper", PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        assert input_path.value == str(orig_dir)
+
+        # Change path to trigger autocomplete
+        input_path.focus()
+        input_path.value = str(tmp_path) + "/n"
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is True
+
+        # Accept new path
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+        assert input_path.value == str(tmp_path) + "/new_dir/"
+
+        # Save and close
+        dialog.action_submit()
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+        updated = node_service.get_node(node.id)
+        assert updated.path == str(tmp_path) + "/new_dir"
+
+
+@pytest.mark.asyncio
+async def test_add_node_dialog_escape_closes_suggestions_first(
+    session: Session,
+) -> None:
+    """Verify Escape closes suggestions popup first, and second Escape closes dialog."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        await pilot.press("a")
+        dialog = app.screen
+        assert isinstance(dialog, AddNodeDialog)
+
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+
+        p_widget = dialog.query_one("#input-path-wrapper", PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        input_path.focus()
+
+        input_path.value = "."
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is True
+
+        # First Escape: suggestions closed, dialog stays
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is False
+        assert isinstance(app.screen, AddNodeDialog)
+
+        # Second Escape: dialog closed
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_spaces(tmp_path: Path) -> None:
+    """Test autocomplete works seamlessly with directories containing spaces."""
+    (tmp_path / "folder with spaces").mkdir()
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        p_widget = app.screen.query_one(PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        input_path.focus()
+
+        input_path.value = str(tmp_path) + "/folder"
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is True
+
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+        assert input_path.value == str(tmp_path) + "/folder with spaces/"
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_permission_denied(tmp_path: Path, monkeypatch) -> None:
+    """Verify permission denied filesystem error outputs correctly."""
+    import os
+
+    def mock_scandir(path):
+        raise PermissionError("Permission denied.")
+
+    monkeypatch.setattr(os, "scandir", mock_scandir)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        p_widget = app.screen.query_one(PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        input_path.focus()
+
+        input_path.value = str(tmp_path) + "/b"
+        await pilot.pause(0.01)
+
+        assert p_widget.is_suggestions_visible is True
+        option_list = p_widget.option_list
+        assert option_list.option_count == 1
+        assert option_list.get_option_at_index(0).disabled is True
+        assert str(option_list.get_option_at_index(0).prompt) == "Permission denied."
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_click_option(tmp_path: Path) -> None:
+    """Verify OptionSelected event directly maps and accepts the clicked Option."""
+    from textual.widgets import OptionList
+
+    (tmp_path / "blocks").mkdir()
+    (tmp_path / "blender").mkdir()
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        p_widget = app.screen.query_one(PathAutocomplete)
+        input_path = p_widget.query_one("#input-path")
+        input_path.focus()
+
+        input_path.value = str(tmp_path) + "/b"
+        await pilot.pause(0.01)
+        assert p_widget.is_suggestions_visible is True
+
+        option_list = p_widget.option_list
+        # Select second option specifically to bypass highlighted mismatch
+        option_list.highlighted = 0
+        target_option = option_list.get_option_at_index(1)  # blocks/
+
+        # Post OptionSelected manually
+        option_list.post_message(
+            OptionList.OptionSelected(option_list, target_option, 1)
+        )
+        await pilot.pause(0.01)
+
+        assert p_widget.is_suggestions_visible is False
+        assert input_path.value == str(tmp_path) + "/blocks/"
+
+
+def test_no_debug_output_in_path_autocomplete() -> None:
+    """Ensure no print() debug statement is used in the PathAutocomplete widget."""
+    from pathlib import Path
+
+    path_file = Path("src/pathtree/ui/widgets/path_autocomplete.py")
+    content = path_file.read_text(encoding="utf-8")
+    assert "print(" not in content, (
+        "PathAutocomplete should not contain print statements!"
+    )
 
 
 @pytest.mark.asyncio

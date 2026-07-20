@@ -20,6 +20,11 @@ class PathAutocompleteInput(Input):
                 event.prevent_default()
                 event.stop()
 
+    def on_blur(self, event: events.Blur) -> None:
+        """Hide suggestions when focus leaves the input."""
+        if self.parent and hasattr(self.parent, "hide_suggestions"):
+            self.parent.hide_suggestions()
+
 
 class PathAutocomplete(Widget):
     """A reusable path autocomplete widget with directory suggestions."""
@@ -31,7 +36,7 @@ class PathAutocomplete(Widget):
         position: relative;
     }
 
-    #path-suggestions-list {
+    PathAutocomplete .path-suggestions-list {
         display: none;
         position: absolute;
         top: 3;
@@ -60,6 +65,7 @@ class PathAutocomplete(Widget):
         self.input_id = id or "input-path"
         self.is_suggestions_visible = False
         self._last_accepted_value = None
+        self.option_list = OptionList(classes="path-suggestions-list")
 
     def compose(self) -> ComposeResult:
         """Compose the wrapped Input and suggestions OptionList."""
@@ -68,7 +74,7 @@ class PathAutocomplete(Widget):
             placeholder=self.placeholder,
             id=self.input_id,
         )
-        yield OptionList(id="path-suggestions-list")
+        yield self.option_list
 
     def on_mount(self) -> None:
         """Initialize the suggestion list state."""
@@ -84,7 +90,6 @@ class PathAutocomplete(Widget):
             return False
 
         key = event.key
-        print(f"INTERCEPTED KEY: {key!r}")
         if key in ("down", "ctrl+n"):
             self.move_highlight(1)
             return True
@@ -100,7 +105,7 @@ class PathAutocomplete(Widget):
                 return True
             else:
                 self.hide_suggestions()
-                return True
+                return False  # Do NOT consume Enter. Let dialog process it.
         elif key == "escape":
             self.hide_suggestions()
             return True
@@ -112,12 +117,11 @@ class PathAutocomplete(Widget):
 
         Wraps around when reaching boundaries.
         """
-        option_list = self.query_one("#path-suggestions-list", OptionList)
-        count = option_list.option_count
+        count = self.option_list.option_count
         if count == 0:
             return
 
-        current = option_list.highlighted
+        current = self.option_list.highlighted
         if current is None:
             new_idx = 0 if direction > 0 else count - 1
         else:
@@ -125,34 +129,23 @@ class PathAutocomplete(Widget):
 
         # If option is disabled, try to find a non-disabled one
         start_idx = new_idx
-        while option_list.get_option_at_index(new_idx).disabled:
+        while self.option_list.get_option_at_index(new_idx).disabled:
             new_idx = (new_idx + direction) % count
             if new_idx == start_idx:
                 break
 
-        option_list.highlighted = new_idx
+        self.option_list.highlighted = new_idx
 
     def has_valid_suggestion_highlighted(self) -> bool:
         """Check if a valid (non-disabled) suggestion is highlighted."""
-        option_list = self.query_one("#path-suggestions-list", OptionList)
-        current = option_list.highlighted
+        current = self.option_list.highlighted
         if current is None:
             return False
-        option = option_list.get_option_at_index(current)
+        option = self.option_list.get_option_at_index(current)
         return not option.disabled
 
-    def accept_highlighted_suggestion(self) -> None:
-        """Accept the highlighted suggestion and update the input value."""
-        if not self.has_valid_suggestion_highlighted():
-            return
-
-        option_list = self.query_one("#path-suggestions-list", OptionList)
-        current = option_list.highlighted
-        if current is None:
-            return
-        option = option_list.get_option_at_index(current)
-        suggestion = str(option.prompt)
-
+    def accept_suggestion(self, suggestion: str) -> None:
+        """Accept a suggestion string and update the input value."""
         input_widget = self.query_one(f"#{self.input_id}", Input)
         current_value = input_widget.value
 
@@ -168,16 +161,25 @@ class PathAutocomplete(Widget):
 
         self.hide_suggestions()
 
+    def accept_highlighted_suggestion(self) -> None:
+        """Accept the highlighted suggestion and update the input value."""
+        if not self.has_valid_suggestion_highlighted():
+            return
+
+        current = self.option_list.highlighted
+        if current is None:
+            return
+        option = self.option_list.get_option_at_index(current)
+        self.accept_suggestion(str(option.prompt))
+
     def show_suggestions(self) -> None:
         """Display the suggestion list overlay."""
-        option_list = self.query_one("#path-suggestions-list", OptionList)
-        option_list.display = True
+        self.option_list.display = True
         self.is_suggestions_visible = True
 
     def hide_suggestions(self) -> None:
         """Hide the suggestion list overlay."""
-        option_list = self.query_one("#path-suggestions-list", OptionList)
-        option_list.display = False
+        self.option_list.display = False
         self.is_suggestions_visible = False
 
     def on_input_changed(self, event: Input.Changed) -> None:
@@ -204,7 +206,7 @@ class PathAutocomplete(Widget):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         """Handle mouse clicks on suggestion items."""
         if not event.option.disabled:
-            self.accept_highlighted_suggestion()
+            self.accept_suggestion(str(event.option.prompt))
 
     def update_suggestions(self, value: str) -> None:
         """Scan parent directory and update the suggestions list."""
@@ -218,12 +220,20 @@ class PathAutocomplete(Widget):
 
         scandir_path = os.path.expanduser(typed_dir) if typed_dir else "."
 
-        option_list = self.query_one("#path-suggestions-list", OptionList)
+        # 1. Validate parent directory existence and directory status
+        if not os.path.exists(scandir_path):
+            self.option_list.clear_options()
+            self.option_list.add_option(
+                Option("Directory does not exist.", disabled=True)
+            )
+            self.show_suggestions()
+            return
 
-        # 1. Validate parent directory
-        if not os.path.exists(scandir_path) or not os.path.isdir(scandir_path):
-            option_list.clear_options()
-            option_list.add_option(Option("Directory does not exist.", disabled=True))
+        if not os.path.isdir(scandir_path):
+            self.option_list.clear_options()
+            self.option_list.add_option(
+                Option("Directory is not accessible.", disabled=True)
+            )
             self.show_suggestions()
             return
 
@@ -231,12 +241,30 @@ class PathAutocomplete(Widget):
         entries = []
         try:
             with os.scandir(scandir_path) as it:
-                for entry in it:
-                    if entry.is_dir(follow_symlinks=True):
-                        entries.append(entry.name + "/")
+                while True:
+                    try:
+                        entry = next(it, None)
+                        if entry is None:
+                            break
+                        try:
+                            if entry.is_dir(follow_symlinks=True):
+                                entries.append(entry.name + "/")
+                        except OSError:
+                            # Safely ignore a single broken entry
+                            pass
+                    except OSError as e:
+                        # Re-raise directory scan failure so outer try-except catches it
+                        raise e
+        except PermissionError:
+            self.option_list.clear_options()
+            self.option_list.add_option(Option("Permission denied.", disabled=True))
+            self.show_suggestions()
+            return
         except OSError:
-            option_list.clear_options()
-            option_list.add_option(Option("Directory does not exist.", disabled=True))
+            self.option_list.clear_options()
+            self.option_list.add_option(
+                Option("Directory is not accessible.", disabled=True)
+            )
             self.show_suggestions()
             return
 
@@ -262,14 +290,16 @@ class PathAutocomplete(Widget):
                 all_matches.append(name)
 
         # 4. Display options
-        option_list.clear_options()
+        self.option_list.clear_options()
         if not all_matches:
-            option_list.add_option(Option("No matching directories.", disabled=True))
+            self.option_list.add_option(
+                Option("No matching directories.", disabled=True)
+            )
             self.show_suggestions()
             return
 
         for match in all_matches:
-            option_list.add_option(Option(match))
+            self.option_list.add_option(Option(match))
 
-        option_list.highlighted = 0
+        self.option_list.highlighted = 0
         self.show_suggestions()
