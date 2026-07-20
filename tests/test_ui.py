@@ -1090,6 +1090,60 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+@pytest.mark.asyncio
+async def test_add_node_dialog_visibility_regression(session: Session) -> None:
+    """Verify PathAutocomplete visibility matches 'Directory' selected type."""
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # 1. Trigger dialog
+        await pilot.press("a")
+        dialog = app.screen
+        assert isinstance(dialog, AddNodeDialog)
+
+        path_container = dialog.query_one("#path-field-container")
+        autocomplete = dialog.query_one("#input-path-wrapper", PathAutocomplete)
+
+        # Initially Workspace -> hidden
+        assert path_container.display is False
+
+        # --- Test 1: Workspace -> Directory ---
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+        assert path_container.display is True
+        assert autocomplete.visible is True
+        assert autocomplete.styles.display == "block"
+
+        # --- Test 2: Directory -> Folder ---
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+        assert path_container.display is False
+
+        # --- Test 3: Folder -> Directory ---
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+        assert path_container.display is True
+        assert autocomplete.visible is True
+        assert autocomplete.styles.display == "block"
+
+        # --- Test 4: Directory -> Folder -> Directory ---
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+        assert path_container.display is False
+
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+        assert path_container.display is True
+        assert autocomplete.visible is True
+        assert autocomplete.styles.display == "block"
+
+        await pilot.press("escape")
+
+
 class AutocompleteTestApp(App[None]):
     """Simple test app to isolate PathAutocomplete testing."""
 

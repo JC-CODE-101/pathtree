@@ -31,7 +31,8 @@ class PathAutocomplete(Widget):
 
     CSS: ClassVar[str] = """
     PathAutocomplete {
-        height: auto;
+        height: 3;
+        min-height: 3;
         layout: vertical;
         position: relative;
     }
