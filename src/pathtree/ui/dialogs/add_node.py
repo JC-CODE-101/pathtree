@@ -297,17 +297,28 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
     def on_key(self, event) -> None:
         if event.key == "escape":
             event.prevent_default()
-            self.dismiss(None)
+            event.stop()
+            self.action_cancel()
         elif event.key == "enter":
-            # Only submit if a button/input has focus, otherwise normal Textual behavior
             focused = self.screen.focused
-            target_ids = {
+            submit_ids = {
                 "btn-create",
                 "input-name",
                 "input-path",
                 "input-description",
                 "input-icon",
             }
-            if focused and focused.id in target_ids:
+            cancel_ids = {
+                "btn-cancel",
+            }
+            if focused and focused.id in submit_ids:
                 event.prevent_default()
+                event.stop()
                 self.action_submit()
+            elif focused and focused.id in cancel_ids:
+                event.prevent_default()
+                event.stop()
+                self.action_cancel()
+            else:
+                # Still stop event leakage without preventing default behavior
+                event.stop()
