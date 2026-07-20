@@ -223,10 +223,11 @@ class EditNodeDialog(ModalScreen[bool]):
     def on_key(self, event) -> None:
         if event.key == "escape":
             event.prevent_default()
-            self.dismiss(False)
+            event.stop()
+            self.action_cancel()
         elif event.key == "enter":
             focused = self.screen.focused
-            target_ids = {
+            submit_ids = {
                 "btn-save",
                 "input-name",
                 "input-path",
@@ -234,6 +235,16 @@ class EditNodeDialog(ModalScreen[bool]):
                 "input-icon",
                 "input-sort-order",
             }
-            if focused and focused.id in target_ids:
+            cancel_ids = {
+                "btn-cancel",
+            }
+            if focused and focused.id in submit_ids:
                 event.prevent_default()
+                event.stop()
                 self.action_submit()
+            elif focused and focused.id in cancel_ids:
+                event.prevent_default()
+                event.stop()
+                self.action_cancel()
+            else:
+                event.stop()

@@ -85,7 +85,7 @@ class MainScreen(Screen[None]):
         if tree.load_error:
             details_panel.update_error(tree.load_error)
         else:
-            self._update_details_and_selection()
+            self.call_after_refresh(self._update_details_and_selection)
 
     def _update_details_and_selection(self) -> None:
         """Utility to safely update details panel based on selected tree cursor."""
@@ -119,6 +119,9 @@ class MainScreen(Screen[None]):
 
     def on_tree_node_selected(self, event: Tree.NodeSelected[uuid.UUID]) -> None:
         """Handle node activation when Enter is pressed on a node."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+        if not tree.has_focus:
+            return
         node_id = event.node.data
         if node_id is None:
             return
@@ -127,6 +130,8 @@ class MainScreen(Screen[None]):
     def action_activate_selected(self) -> None:
         """Fallback action to activate the currently highlighted node."""
         tree = self.query_one("#tree-view", NodeTreeView)
+        if not tree.has_focus:
+            return
         if tree.cursor_node is not None and tree.cursor_node.data is not None:
             self.activate_node(tree.cursor_node.data)
 
@@ -157,6 +162,7 @@ class MainScreen(Screen[None]):
         self,
         selected_node_id: uuid.UUID | None = None,
         fallback_node_id: uuid.UUID | None = None,
+        expanded_node_ids: set[uuid.UUID] | None = None,
     ) -> None:
         """Refresh the visible tree.
 
@@ -165,8 +171,11 @@ class MainScreen(Screen[None]):
         tree = self.query_one("#tree-view", NodeTreeView)
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
 
-        # Capture expanded node IDs before rebuilding
-        expanded_node_ids = tree.get_expanded_node_ids()
+        # Capture expanded node IDs before rebuilding if not explicitly supplied
+        if expanded_node_ids is None:
+            expanded_node_ids = tree.get_expanded_node_ids()
+        else:
+            expanded_node_ids = set(expanded_node_ids)
 
         # Update cached empty database status
         try:
@@ -208,6 +217,17 @@ class MainScreen(Screen[None]):
         # Keep track of selected ID
         self._last_selected_node_id = target_id
 
+        # After Add or Move (or any select), ensure complete ancestor chain is expanded
+        if target_id is not None:
+            curr_id = target_id
+            while curr_id is not None:
+                curr_node = self.node_service.get_node(curr_id)
+                if curr_node is None:
+                    break
+                if curr_node.parent_id is not None:
+                    expanded_node_ids.add(curr_node.parent_id)
+                curr_id = curr_node.parent_id
+
         # Reload tree in the widget
         tree.load_tree(
             filtered_nodes,
@@ -219,7 +239,7 @@ class MainScreen(Screen[None]):
         if not filtered_nodes and is_now_non_empty:
             tree.move_cursor(None)
 
-        self._update_details_and_selection()
+        self.call_after_refresh(self._update_details_and_selection)
 
     def on_node_tree_view_focus_search(self, event: NodeTreeView.FocusSearch) -> None:
         """Focus SearchInput when '/' or 's' is pressed in the tree."""
@@ -229,6 +249,9 @@ class MainScreen(Screen[None]):
     def on_node_tree_view_add_node(self, event: NodeTreeView.AddNode) -> None:
         """Handle 'a' key in tree to open Add Node Dialog."""
         tree = self.query_one("#tree-view", NodeTreeView)
+
+        # Capture expansion state before opening the dialog
+        captured_expanded_node_ids = tree.get_expanded_node_ids()
 
         # Default parent behavior:
         # No selection -> Root
@@ -255,7 +278,10 @@ class MainScreen(Screen[None]):
                         else new_node.node_kind
                     )
                     self.app.notify(f'Created {node_type_label} "{new_node.name}"')
-                self.refresh_tree(selected_node_id=new_node_id)
+                self.refresh_tree(
+                    selected_node_id=new_node_id,
+                    expanded_node_ids=captured_expanded_node_ids,
+                )
             tree.focus()
 
         self.app.push_screen(
@@ -269,6 +295,8 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
+        # Capture expansion state before opening the dialog
+        captured_expanded_node_ids = tree.get_expanded_node_ids()
         node_id = tree.cursor_node.data
 
         def handle_edit_finished(success: bool) -> None:
@@ -276,7 +304,10 @@ class MainScreen(Screen[None]):
                 node = self.node_service.get_node(node_id)
                 if node is not None:
                     self.app.notify(f'Updated "{node.name}"')
-                self.refresh_tree(selected_node_id=node_id)
+                self.refresh_tree(
+                    selected_node_id=node_id,
+                    expanded_node_ids=captured_expanded_node_ids,
+                )
             tree.focus()
 
         self.app.push_screen(
@@ -290,6 +321,8 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
+        # Capture expansion state before opening the dialog
+        captured_expanded_node_ids = tree.get_expanded_node_ids()
         node_id = tree.cursor_node.data
 
         def handle_move_finished(success: bool) -> None:
@@ -297,7 +330,10 @@ class MainScreen(Screen[None]):
                 node = self.node_service.get_node(node_id)
                 if node is not None:
                     self.app.notify(f'Moved "{node.name}"')
-                self.refresh_tree(selected_node_id=node_id)
+                self.refresh_tree(
+                    selected_node_id=node_id,
+                    expanded_node_ids=captured_expanded_node_ids,
+                )
             tree.focus()
 
         self.app.push_screen(
@@ -310,6 +346,9 @@ class MainScreen(Screen[None]):
         tree = self.query_one("#tree-view", NodeTreeView)
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
+
+        # Capture expansion state before opening the dialog
+        captured_expanded_node_ids = tree.get_expanded_node_ids()
 
         node_id = tree.cursor_node.data
         node = self.node_service.get_node(node_id)
@@ -345,7 +384,12 @@ class MainScreen(Screen[None]):
                 else:
                     self.app.notify(f'Deleted "{node.name}"')
 
-                self.refresh_tree(fallback_node_id=fallback_node_id)
+                # Filter out the deleted node from captured expanded IDs
+                remaining_expanded_ids = captured_expanded_node_ids - {node_id}
+                self.refresh_tree(
+                    fallback_node_id=fallback_node_id,
+                    expanded_node_ids=remaining_expanded_ids,
+                )
             tree.focus()
 
         self.app.push_screen(
@@ -406,7 +450,7 @@ class MainScreen(Screen[None]):
             # Clear cursor node highlight since there are no visible tree nodes
             tree.move_cursor(None)
 
-        self._update_details_and_selection()
+        self.call_after_refresh(self._update_details_and_selection)
 
     def on_search_input_escape_pressed(self, event: SearchInput.EscapePressed) -> None:
         """Clear query, restore full tree, and return focus to NodeTreeView."""
