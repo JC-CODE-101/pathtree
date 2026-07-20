@@ -66,6 +66,27 @@ class EditNodeDialog(ModalScreen[bool]):
     Button {
         margin-left: 2;
     }
+
+    PathAutocomplete {
+        width: 100%;
+        height: 3;
+        min-height: 3;
+    }
+
+    PathAutocomplete .path-autocomplete-input {
+        width: 100%;
+        height: 100%;
+    }
+
+    PathAutocomplete .path-suggestions-list {
+        display: none;
+        position: absolute;
+        offset: 0 3;
+        width: 100%;
+        max-height: 8;
+        background: $panel;
+        border: solid $accent;
+    }
     """
 
     def __init__(self, node_service: NodeService, node_id: uuid.UUID) -> None:

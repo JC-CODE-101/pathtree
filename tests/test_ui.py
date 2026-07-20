@@ -964,7 +964,7 @@ async def test_add_node_dialog_persistence_failure_display(session: Session) -> 
 
     node_service = NodeService(NodeRepository(session))
     app = PathTreeApp(node_service=node_service)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 60)) as pilot:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
@@ -1092,7 +1092,9 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
 
 @pytest.mark.asyncio
 async def test_add_node_dialog_visibility_regression(session: Session) -> None:
-    """Verify PathAutocomplete visibility matches 'Directory' selected type."""
+    """Verify PathAutocomplete visibility, dimensions, focus, and rendering order."""
+    from pathtree.ui.widgets.path_autocomplete import PathAutocompleteInput
+
     node_service = NodeService(NodeRepository(session))
     app = PathTreeApp(node_service=node_service)
     async with app.run_test() as pilot:
@@ -1107,16 +1109,44 @@ async def test_add_node_dialog_visibility_regression(session: Session) -> None:
 
         path_container = dialog.query_one("#path-field-container")
         autocomplete = dialog.query_one("#input-path-wrapper", PathAutocomplete)
+        inner_input = autocomplete.query_one(
+            ".path-autocomplete-input", PathAutocompleteInput
+        )
+        path_label = dialog.query_one("#path-field-container Label")
+        description_label = dialog.query_one("#input-description").parent.query_one(
+            "Label"
+        )
 
         # Initially Workspace -> hidden
         assert path_container.display is False
 
+        # Helper to assert that inner input is fully rendered, visible,
+        # sized, and on-screen
+        async def assert_input_fully_rendered():
+            await pilot.pause(0.05)  # wait for layout refresh
+            assert inner_input.visible is True
+            assert inner_input.display is True
+            assert inner_input.region.width > 0
+            assert inner_input.region.height >= 3
+            assert inner_input.is_on_screen is True
+
+            # Assert vertical layout rendering order
+            assert path_label.region.y < inner_input.region.y
+            assert inner_input.region.bottom <= description_label.region.y
+
         # --- Test 1: Workspace -> Directory ---
         await pilot.click("#radio-directory")
+        await assert_input_fully_rendered()
+
+        # Verify focus and interactive typing
+        inner_input.focus()
         await pilot.pause(0.01)
-        assert path_container.display is True
-        assert autocomplete.visible is True
-        assert autocomplete.styles.display == "block"
+        assert app.focused is inner_input
+
+        # Type text
+        await pilot.press("tilde", "slash", "w", "s")
+        await pilot.pause(0.01)
+        assert inner_input.value == "~/ws"
 
         # --- Test 2: Directory -> Folder ---
         await pilot.click("#radio-folder")
@@ -1125,10 +1155,18 @@ async def test_add_node_dialog_visibility_regression(session: Session) -> None:
 
         # --- Test 3: Folder -> Directory ---
         await pilot.click("#radio-directory")
+        await assert_input_fully_rendered()
+
+        # Verify focus and typing again
+        inner_input.focus()
         await pilot.pause(0.01)
-        assert path_container.display is True
-        assert autocomplete.visible is True
-        assert autocomplete.styles.display == "block"
+        assert app.focused is inner_input
+
+        # Clear and type again
+        inner_input.value = ""
+        await pilot.press("tilde", "slash", "w", "s")
+        await pilot.pause(0.01)
+        assert inner_input.value == "~/ws"
 
         # --- Test 4: Directory -> Folder -> Directory ---
         await pilot.click("#radio-folder")
@@ -1136,12 +1174,11 @@ async def test_add_node_dialog_visibility_regression(session: Session) -> None:
         assert path_container.display is False
 
         await pilot.click("#radio-directory")
-        await pilot.pause(0.01)
-        assert path_container.display is True
-        assert autocomplete.visible is True
-        assert autocomplete.styles.display == "block"
+        await assert_input_fully_rendered()
 
         await pilot.press("escape")
+        if app.screen.id != "main-screen":
+            await pilot.press("escape")
 
 
 class AutocompleteTestApp(App[None]):

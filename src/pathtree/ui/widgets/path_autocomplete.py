@@ -31,22 +31,24 @@ class PathAutocomplete(Widget):
 
     CSS: ClassVar[str] = """
     PathAutocomplete {
+        width: 100%;
         height: 3;
         min-height: 3;
-        layout: vertical;
-        position: relative;
+    }
+
+    PathAutocomplete .path-autocomplete-input {
+        width: 100%;
+        height: 100%;
     }
 
     PathAutocomplete .path-suggestions-list {
         display: none;
         position: absolute;
-        top: 3;
-        left: 0;
+        offset: 0 3;
         width: 100%;
         max-height: 8;
-        z-index: 1000;
         background: $panel;
-        border: thin $accent;
+        border: solid $accent;
     }
     """
 
@@ -74,6 +76,7 @@ class PathAutocomplete(Widget):
             value=self.initial_value,
             placeholder=self.placeholder,
             id=self.input_id,
+            classes="path-autocomplete-input",
         )
         yield self.option_list
 
