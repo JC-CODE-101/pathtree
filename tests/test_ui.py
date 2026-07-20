@@ -1089,6 +1089,134 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_add_node_dialog_vim_navigation(session: Session) -> None:
+    """Test Vim-style navigation (j/k) and standard arrow key
+    navigation in AddNodeDialog.
+
+    Ensures:
+    - 'j' moves Workspace -> Folder -> Directory
+    - 'k' moves Directory -> Folder -> Workspace
+    - Arrow keys still work (e.g. right/left)
+    - j/k typed inside Name, Path, Description, or Icon inputs remain normal text
+    - selected_type stays synchronized with the active RadioButton
+    """
+    node_service = NodeService(NodeRepository(session))
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # 1. Trigger dialog
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+
+        # Node type starts as "workspace"
+        assert dialog.selected_type == "workspace"
+
+        # Focus the RadioSet to test j/k
+        radio_set = dialog.query_one("#node-type-radio-set")
+        radio_set.focus()
+        await pilot.pause(0.01)
+        assert app.focused == radio_set
+
+        # Test 'j' moves Workspace -> Folder
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "folder"
+
+        # Test 'j' moves Folder -> Directory
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "directory"
+
+        # Test wrapping with 'j' moves Directory -> Workspace
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "workspace"
+
+        # Test 'k' moves Workspace -> Directory (wrapping)
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "directory"
+
+        # Test 'k' moves Directory -> Folder
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "folder"
+
+        # Test 'k' moves Folder -> Workspace
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "workspace"
+
+        # Test arrow keys still work
+        # Move to Folder using arrow key (e.g. right) and toggle/press it with Space
+        await pilot.press("right")
+        await pilot.pause(0.01)
+        await pilot.press("space")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "folder"
+
+        # 2. Test j/k typed inside input fields remain normal text and do not navigate
+        input_name = dialog.query_one("#input-name")
+        input_name.focus()
+        await pilot.pause(0.01)
+        assert app.focused == input_name
+
+        # Type "j" and "k"
+        await pilot.press("j")
+        await pilot.press("k")
+        await pilot.pause(0.01)
+
+        # Check input value has "jk"
+        assert input_name.value == "jk"
+        # Node Type remains Folder (was not changed by typing j/k in Input)
+        assert dialog.selected_type == "folder"
+
+        # Test description input
+        input_desc = dialog.query_one("#input-description")
+        input_desc.focus()
+        await pilot.pause(0.01)
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert input_desc.value == "j"
+        assert dialog.selected_type == "folder"
+
+        # Test icon input (always visible)
+        input_icon = dialog.query_one("#input-icon")
+        input_icon.focus()
+        await pilot.pause(0.01)
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert input_icon.value == "k"
+        assert dialog.selected_type == "folder"
+
+        # Switch to directory type so path input is visible/displayed
+        radio_set.focus()
+        await pilot.pause(0.01)
+        await pilot.press("j")  # moves folder -> directory
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "directory"
+
+        # Test path input (now visible)
+        input_path = dialog.query_one("#input-path")
+        input_path.focus()
+        await pilot.pause(0.01)
+        await pilot.press("j")
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert input_path.value == "jk"
+        assert dialog.selected_type == "directory"
+
+        # Cancel dialog
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
 async def test_add_and_move_blank_selection_constraints(session: Session) -> None:
     """Verify select validation and blank selection constraints in dialogs."""
     repo = NodeRepository(session)

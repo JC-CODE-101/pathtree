@@ -295,6 +295,28 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
     # Key bindings inside dialog
     def on_key(self, event) -> None:
+        if event.key in ("j", "k"):
+            focused = self.screen.focused
+            radio_set = self.query_one("#node-type-radio-set", RadioSet)
+            is_radio_focused = False
+            if focused is not None:
+                if focused == radio_set:
+                    is_radio_focused = True
+                elif isinstance(focused, RadioButton) and focused in radio_set.query(
+                    RadioButton
+                ):
+                    is_radio_focused = True
+
+            if is_radio_focused:
+                event.prevent_default()
+                event.stop()
+                if event.key == "j":
+                    radio_set.action_next_button()
+                else:
+                    radio_set.action_previous_button()
+                radio_set.action_toggle_button()
+                return
+
         if event.key == "escape":
             event.prevent_default()
             event.stop()
