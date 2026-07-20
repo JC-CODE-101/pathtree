@@ -84,7 +84,7 @@ class PathAutocomplete(Widget):
         self.placeholder = placeholder
         self.input_id = id or "input-path"
         self.is_suggestions_visible = False
-        self._last_accepted_value = None
+        self._is_accepting_suggestion = False
         self.option_list = PathAutocompleteOptionList(
             classes="path-suggestions-list", parent_widget=self
         )
@@ -211,11 +211,15 @@ class PathAutocomplete(Widget):
         else:
             new_value = suggestion
 
-        self._last_accepted_value = new_value
+        self._is_accepting_suggestion = True
         input_widget.value = new_value
         input_widget.cursor_position = len(new_value)
 
-        self.hide_suggestions()
+        if new_value.endswith("/"):
+            # Rescan the accepted directory immediately in the next frame
+            self.call_after_refresh(self.update_suggestions, new_value)
+        else:
+            self.hide_suggestions()
 
     def accept_highlighted_suggestion(self) -> None:
         """Accept the highlighted suggestion and update the input value."""
@@ -244,12 +248,12 @@ class PathAutocomplete(Widget):
         if event.input.id != self.input_id:
             return
 
-        value = event.value
-        if self._last_accepted_value == value:
+        # Skip normal update if this is our own programmatic accepted value
+        if self._is_accepting_suggestion:
+            self._is_accepting_suggestion = False
             return
 
-        self._last_accepted_value = None
-
+        value = event.value
         if not value.strip():
             self.hide_suggestions()
             return

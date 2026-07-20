@@ -1090,6 +1090,241 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+@pytest.mark.asyncio
+async def test_path_autocomplete_chained_tab_completion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Test chained Tab completion through multiple directory levels."""
+    import os
+
+    # Structure: root/code/python/projects/
+    root = tmp_path / "root"
+    code = root / "code"
+    python = code / "python"
+    projects = python / "projects"
+    projects.mkdir(parents=True)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path)))
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        # 1. Type partial
+        input_widget.value = "root/co"
+        await pilot.pause(0.05)
+
+        assert widget.is_suggestions_visible is True
+        option_list = widget.option_list
+        assert option_list.option_count == 1
+        assert str(option_list.get_option_at_index(0).prompt) == "code/"
+
+        # 2. Press Tab -> completes to root/code/
+        # and immediately opens children of code/
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+
+        assert input_widget.value == "root/code/"
+        assert widget.is_suggestions_visible is True
+        assert option_list.option_count == 1
+        assert str(option_list.get_option_at_index(0).prompt) == "python/"
+        assert option_list.highlighted == 0
+        assert app.focused is input_widget
+
+        # 3. Press Tab -> completes to root/code/python/ and immediately opens children
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+
+        assert input_widget.value == "root/code/python/"
+        assert widget.is_suggestions_visible is True
+        assert option_list.option_count == 1
+        assert str(option_list.get_option_at_index(0).prompt) == "projects/"
+        assert option_list.highlighted == 0
+
+        # 4. Press Tab -> completes to root/code/python/projects/
+        # Since projects/ has no children, it should show "No matching directories."
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+
+        assert input_widget.value == "root/code/python/projects/"
+        assert widget.is_suggestions_visible is True
+        assert option_list.option_count == 1
+        assert option_list.get_option_at_index(0).disabled is True
+        assert "No matching directories" in str(
+            option_list.get_option_at_index(0).prompt
+        )
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_chained_enter_completion(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Test chained Enter completion through multiple directory levels."""
+    root = tmp_path / "root"
+    code = root / "code"
+    python = code / "python"
+    python.mkdir(parents=True)
+
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        input_widget.value = "root/co"
+        await pilot.pause(0.05)
+
+        assert widget.is_suggestions_visible is True
+
+        # First Enter accepts "code/"
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+
+        assert input_widget.value == "root/code/"
+        assert widget.is_suggestions_visible is True
+        assert widget.option_list.option_count == 1
+        assert str(widget.option_list.get_option_at_index(0).prompt) == "python/"
+
+        # Second Enter accepts "python/"
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+
+        assert input_widget.value == "root/code/python/"
+        assert widget.is_suggestions_visible is True
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_empty_accepted_directory(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Test empty match state and no stale suggestions upon directory acceptance."""
+    root = tmp_path / "root"
+    root.mkdir()  # empty!
+
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        input_widget.value = "r"
+        await pilot.pause(0.05)
+        assert widget.is_suggestions_visible is True
+        assert str(widget.option_list.get_option_at_index(0).prompt) == "root/"
+
+        # Accept
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+
+        # Output should be "No matching directories."
+        # and no stale suggestions from the parent
+        assert input_widget.value == "root/"
+        assert widget.is_suggestions_visible is True
+        assert widget.option_list.option_count == 1
+        assert widget.option_list.get_option_at_index(0).disabled is True
+        assert "No matching directories" in str(
+            widget.option_list.get_option_at_index(0).prompt
+        )
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_editing_after_acceptance(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verify editing/backspacing after acceptance immediately refreshes suggestions."""
+    root = tmp_path / "root"
+    code = root / "code"
+    python = code / "python"
+    python.mkdir(parents=True)
+
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        input_widget.value = "root/co"
+        await pilot.pause(0.05)
+
+        # Accept
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+        assert input_widget.value == "root/code/"
+        assert widget.option_list.option_count == 1
+
+        # Press backspace (input value becomes "root/code")
+        await pilot.press("backspace")
+        await pilot.pause(0.05)
+
+        # It should immediately rescan the parent directory and find "code/"
+        # because value is "root/code"
+        assert input_widget.value == "root/code"
+        assert widget.is_suggestions_visible is True
+        assert str(widget.option_list.get_option_at_index(0).prompt) == "code/"
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_tilde_relative_absolute_chained(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verify tilde, relative, and absolute chained completion."""
+    import os
+
+    root = tmp_path / "root"
+    code = root / "code"
+    code.mkdir(parents=True)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path)))
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        # 1. Tilde
+        input_widget.value = "~/r"
+        await pilot.pause(0.05)
+        assert widget.is_suggestions_visible is True
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+        assert input_widget.value == "~/root/"
+        assert str(widget.option_list.get_option_at_index(0).prompt) == "code/"
+
+        # 2. Relative
+        input_widget.value = "./r"
+        await pilot.pause(0.05)
+        assert widget.is_suggestions_visible is True
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+        assert input_widget.value == "./root/"
+        assert str(widget.option_list.get_option_at_index(0).prompt) == "code/"
+
+        # 3. Absolute
+        input_widget.value = str(tmp_path) + "/r"
+        await pilot.pause(0.05)
+        assert widget.is_suggestions_visible is True
+        await pilot.press("tab")
+        await pilot.pause(0.05)
+        assert input_widget.value == str(tmp_path) + "/root/"
+        assert str(widget.option_list.get_option_at_index(0).prompt) == "code/"
+
+
 def get_screen_y(widget) -> int:
     """Helper to calculate the absolute screen Y coordinate of a widget."""
     y = 0
@@ -1162,8 +1397,12 @@ async def test_add_node_dialog_autocomplete_overlay_properties(
 
         # Accept visible option
         await pilot.press("enter")
-        await pilot.pause(0.01)
-        assert p_widget.is_suggestions_visible is False
+        await pilot.pause(0.05)
+        # Slices to empty match state on the newly accepted blocks/
+        assert p_widget.is_suggestions_visible is True
+        assert "No matching directories" in str(
+            p_widget.option_list.get_option_at_index(0).prompt
+        )
         assert input_path.value == str(tmp_path) + "/blocks/"
 
 
@@ -1232,8 +1471,12 @@ async def test_edit_node_dialog_autocomplete_overlay_properties(
 
         # Accept visible option
         await pilot.press("enter")
-        await pilot.pause(0.01)
-        assert p_widget.is_suggestions_visible is False
+        await pilot.pause(0.05)
+        # Slices to empty match state on the newly accepted blocks/
+        assert p_widget.is_suggestions_visible is True
+        assert "No matching directories" in str(
+            p_widget.option_list.get_option_at_index(0).prompt
+        )
         assert input_path.value == str(tmp_path) + "/blocks/"
 
 
@@ -1559,16 +1802,20 @@ async def test_add_node_dialog_autocomplete_enter_acceptance_and_creation(
         await pilot.pause(0.01)
         assert p_widget.is_suggestions_visible is True
 
-        # First Enter: accepts suggestion, suggestions close, dialog remains open
+        # First Enter: accepts suggestion, immediately reopens with empty state
+        # (No matching directories)
         await pilot.press("enter")
-        await pilot.pause(0.01)
-        assert p_widget.is_suggestions_visible is False
+        await pilot.pause(0.05)
+        assert p_widget.is_suggestions_visible is True
+        assert "No matching directories" in str(
+            p_widget.option_list.get_option_at_index(0).prompt
+        )
         assert input_path.value == str(tmp_path) + "/suggested_folder/"
         assert isinstance(app.screen, AddNodeDialog)
 
         # Second Enter: submits and creates
         await pilot.press("enter")
-        await pilot.pause(0.01)
+        await pilot.pause(0.05)
 
         assert app.screen.id == "main-screen"
         from sqlmodel import select
@@ -1746,9 +1993,12 @@ async def test_path_autocomplete_click_option(tmp_path: Path) -> None:
         option_list.post_message(
             OptionList.OptionSelected(option_list, target_option, 1)
         )
-        await pilot.pause(0.01)
+        await pilot.pause(0.05)
 
-        assert p_widget.is_suggestions_visible is False
+        assert p_widget.is_suggestions_visible is True
+        assert "No matching directories" in str(
+            p_widget.option_list.get_option_at_index(0).prompt
+        )
         assert input_path.value == str(tmp_path) + "/blocks/"
 
 
