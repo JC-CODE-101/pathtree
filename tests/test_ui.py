@@ -1090,6 +1090,169 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+class KeyboardShortcutTestApp(App[None]):
+    """Test app with PathAutocomplete and a subsequent Input widget."""
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import Input
+
+        yield PathAutocomplete(id="input-path")
+        yield Input(id="input-description")
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_recursive_symlink_prevention(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verify recursive symlinks are excluded from candidates to prevent loops."""
+    root = tmp_path / "root"
+    root.mkdir()
+    code = root / "code"
+    code.mkdir()
+
+    # Create symlink cycle: root/code/cycle -> root/code
+    cycle_link = code / "cycle"
+    try:
+        cycle_link.symlink_to(code, target_is_directory=True)
+    except OSError:
+        pass
+
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        # Go inside root/code/cycle/
+        input_widget.value = "root/code/cycle/"
+        await pilot.pause(0.05)
+
+        # The option list should not contain "cycle/" because root/code/cycle
+        # resolves to root/code, which is already in the ancestor chain.
+        # It should show "No matching directories." because there are no other folders.
+        assert widget.option_list.option_count == 1
+        assert (
+            str(widget.option_list.get_option_at_index(0).prompt)
+            == "No matching directories."
+        )
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_no_match_behavior(tmp_path: Path, monkeypatch) -> None:
+    """Verify no-match state clears stale options, shows error.
+
+    Blocks Tab/Enter path changes.
+    """
+    root = tmp_path / "root"
+    root.mkdir()
+
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        # Type a prefix with no match
+        input_widget.value = "root/nonexistent"
+        await pilot.pause(0.05)
+
+        # Suggestions should be visible showing "No matching directories."
+        assert widget.is_suggestions_visible is True
+        assert widget.option_list.option_count == 1
+        assert (
+            str(widget.option_list.get_option_at_index(0).prompt)
+            == "No matching directories."
+        )
+
+        # Press Tab
+        await pilot.press("tab")
+        await pilot.pause(0.01)
+        # Value must remain unchanged
+        assert input_widget.value == "root/nonexistent"
+
+        # Refocus/retype
+        input_widget.focus()
+        input_widget.value = "root/nonexistent"
+        await pilot.pause(0.05)
+
+        # Press Enter
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+        # Value must remain unchanged and suggestion popups are hidden
+        assert input_widget.value == "root/nonexistent"
+        assert widget.is_suggestions_visible is False
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_shift_enter_behavior(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verify Shift+Enter hides suggestions and shifts focus without submitting."""
+    (tmp_path / "sub").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    app = KeyboardShortcutTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        input_widget.value = "su"
+        await pilot.pause(0.05)
+        assert widget.is_suggestions_visible is True
+
+        # Press Shift+Enter
+        await pilot.press("shift+enter")
+        await pilot.pause(0.01)
+
+        # Suggestions hidden, path unchanged, focus moves to description field
+        assert widget.is_suggestions_visible is False
+        assert input_widget.value == "su"
+        assert app.focused.id == "input-description"
+
+
+@pytest.mark.asyncio
+async def test_path_autocomplete_shift_space_behavior(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verify Shift+Space reopens suggestions without inserting a space."""
+    (tmp_path / "sub").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    app = AutocompleteTestApp()
+    async with app.run_test() as pilot:
+        widget = app.screen.query_one(PathAutocomplete)
+        input_widget = widget.query_one("#input-path")
+        input_widget.focus()
+        await pilot.pause(0.01)
+
+        input_widget.value = "su"
+        await pilot.pause(0.05)
+        assert widget.is_suggestions_visible is True
+
+        # Hide first
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert widget.is_suggestions_visible is False
+
+        # Press Shift+Space to reopen
+        await pilot.press("shift+space")
+        await pilot.pause(0.05)
+
+        # Reopened, path unchanged (no space inserted), suggestions visible
+        assert widget.is_suggestions_visible is True
+        assert input_widget.value == "su"
+        assert widget.option_list.option_count == 1
+        assert str(widget.option_list.get_option_at_index(0).prompt) == "sub/"
+
+
 @pytest.mark.asyncio
 async def test_path_autocomplete_chained_tab_completion(
     tmp_path: Path, monkeypatch

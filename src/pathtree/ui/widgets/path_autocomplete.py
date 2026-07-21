@@ -142,10 +142,25 @@ class PathAutocomplete(Widget):
         Returns:
             True if the key was handled and should be intercepted; False otherwise.
         """
+        key = event.key
+
+        # Global PathAutocomplete shortcuts (recognized even when hidden)
+        if key == "shift+enter":
+            self.hide_suggestions()
+            if self.screen:
+                self.screen.focus_next()
+            return True
+        elif key == "shift+space":
+            input_widget = self.query_one(f"#{self.input_id}", Input)
+            val = input_widget.value
+            self.option_list.clear_options()
+            self.update_suggestions(val)
+            return True
+
+        # Popup-only keys (only recognized when suggestions are visible)
         if not self.is_suggestions_visible:
             return False
 
-        key = event.key
         if key in ("down", "ctrl+n"):
             self.move_highlight(1)
             return True
@@ -153,8 +168,11 @@ class PathAutocomplete(Widget):
             self.move_highlight(-1)
             return True
         elif key == "tab":
-            self.accept_highlighted_suggestion()
-            return True
+            if self.has_valid_suggestion_highlighted():
+                self.accept_highlighted_suggestion()
+                return True
+            # Let tab transition focus normally if no valid matches are present
+            return False
         elif key == "enter":
             if self.has_valid_suggestion_highlighted():
                 self.accept_highlighted_suggestion()
@@ -276,6 +294,20 @@ class PathAutocomplete(Widget):
 
         scandir_path = os.path.expanduser(typed_dir) if typed_dir else "."
 
+        # Build the set of resolved directory ancestors starting from scandir_path
+        ancestors = set()
+        curr = scandir_path
+        while True:
+            try:
+                real_curr = os.path.realpath(curr)
+                ancestors.add(real_curr)
+            except OSError:
+                pass
+            parent = os.path.dirname(curr)
+            if parent == curr:
+                break
+            curr = parent
+
         # 1. Validate parent directory existence and directory status
         if not os.path.exists(scandir_path):
             self.option_list.clear_options()
@@ -304,7 +336,11 @@ class PathAutocomplete(Widget):
                             break
                         try:
                             if entry.is_dir(follow_symlinks=True):
-                                entries.append(entry.name + "/")
+                                cand_path = os.path.join(scandir_path, entry.name)
+                                real_cand = os.path.realpath(cand_path)
+                                # Cycle check: exclude if resolves to ancestor chain
+                                if real_cand not in ancestors:
+                                    entries.append(entry.name + "/")
                         except OSError:
                             # Safely ignore a single broken entry
                             pass
