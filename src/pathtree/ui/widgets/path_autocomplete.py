@@ -5,6 +5,7 @@ from typing import ClassVar
 
 from textual import events
 from textual.app import ComposeResult
+from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Input, OptionList
 from textual.widgets.option_list import Option
@@ -21,9 +22,9 @@ class PathAutocompleteInput(Input):
                 event.stop()
 
     def on_blur(self, event: events.Blur) -> None:
-        """Hide suggestions when focus leaves the input."""
-        if self.parent and hasattr(self.parent, "hide_suggestions"):
-            self.parent.hide_suggestions()
+        """Forward blur event to parent PathAutocomplete for deferred handling."""
+        if self.parent and hasattr(self.parent, "on_blur"):
+            self.parent.on_blur(event)
 
 
 class PathAutocompleteOptionList(OptionList):
@@ -103,7 +104,7 @@ class PathAutocomplete(Widget):
         try:
             container = self.screen.query_one("#dialog-container")
             container.mount(self.option_list)
-        except Exception:
+        except NoMatches:
             self.screen.mount(self.option_list)
         self.hide_suggestions()
 
@@ -133,7 +134,7 @@ class PathAutocomplete(Widget):
                 self.option_list.styles.width = input_reg.width
             else:
                 self.option_list.styles.width = "100%"
-        except Exception:
+        except (NoMatches, AttributeError):
             pass
 
     def handle_input_key(self, event: events.Key) -> bool:
@@ -233,6 +234,9 @@ class PathAutocomplete(Widget):
         input_widget.value = new_value
         input_widget.cursor_position = len(new_value)
 
+        # Refocus input widget to preserve typing flow during selection
+        input_widget.focus()
+
         if new_value.endswith("/"):
             # Rescan the accepted directory immediately in the next frame
             self.call_after_refresh(self.update_suggestions, new_value)
@@ -279,7 +283,27 @@ class PathAutocomplete(Widget):
         self.update_suggestions(value)
 
     def on_blur(self, event: events.Blur) -> None:
-        """Hide suggestions when focus leaves the widget."""
+        """Defer blur handling to verify if focus has left the component completely."""
+        self.call_after_refresh(self._handle_blur_deferred)
+
+    def _handle_blur_deferred(self) -> None:
+        """Hide suggestions only if focus has left both Input and OptionList."""
+        if not self.is_mounted:
+            return
+
+        try:
+            focused = self.screen.focused
+        except Exception:
+            focused = None
+
+        try:
+            inner_input = self.query_one(f"#{self.input_id}", Input)
+        except NoMatches:
+            inner_input = None
+
+        if focused in (self.option_list, inner_input):
+            return
+
         self.hide_suggestions()
 
     def update_suggestions(self, value: str) -> None:
