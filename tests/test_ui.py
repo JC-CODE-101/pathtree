@@ -1090,6 +1090,262 @@ async def test_add_dialog_parent_behavior(session: Session) -> None:
         await pilot.press("escape")
 
 
+@pytest.mark.asyncio
+async def test_workspace_navigation_forward(session: Session) -> None:
+    """Test W selects the next visible Workspace, wrapping around."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+    ws2 = repo.create(Node(name="WS2", node_kind="workspace", sort_order=2))
+    ws3 = repo.create(Node(name="WS3", node_kind="workspace", sort_order=3))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Initially, cursor is on WS1
+        assert tree.cursor_node.data == ws1.id
+
+        # Press 'w' -> moves to WS2
+        await pilot.press("w")
+        assert tree.cursor_node.data == ws2.id
+
+        # Press 'w' -> moves to WS3
+        await pilot.press("w")
+        assert tree.cursor_node.data == ws3.id
+
+        # Press 'w' -> wraps to WS1
+        await pilot.press("w")
+        assert tree.cursor_node.data == ws1.id
+
+
+@pytest.mark.asyncio
+async def test_workspace_navigation_backward(session: Session) -> None:
+    """Test Shift+W selects the previous visible Workspace, wrapping around."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+    ws2 = repo.create(Node(name="WS2", node_kind="workspace", sort_order=2))
+    ws3 = repo.create(Node(name="WS3", node_kind="workspace", sort_order=3))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Initially, cursor is on WS1
+        assert tree.cursor_node.data == ws1.id
+
+        # Press 'W' (Shift+W) -> wraps to WS3
+        await pilot.press("W")
+        assert tree.cursor_node.data == ws3.id
+
+        # Press 'shift+w' -> moves to WS2
+        await pilot.press("shift+w")
+        assert tree.cursor_node.data == ws2.id
+
+        # Press 'shift+w' -> moves to WS1
+        await pilot.press("shift+w")
+        assert tree.cursor_node.data == ws1.id
+
+
+@pytest.mark.asyncio
+async def test_folder_navigation_workspace_scope(session: Session) -> None:
+    """Test F navigates Folders in current Workspace scope (wrapping around)."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+    f1_a = repo.create(
+        Node(name="F1_A", node_kind="folder", parent_id=ws1.id, sort_order=1)
+    )
+    f1_b = repo.create(
+        Node(name="F1_B", node_kind="folder", parent_id=ws1.id, sort_order=2)
+    )
+
+    ws2 = repo.create(Node(name="WS2", node_kind="workspace", sort_order=2))
+    repo.create(Node(name="F2_A", node_kind="folder", parent_id=ws2.id, sort_order=1))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Expand WS1 and WS2 to make Folders visible
+        # First, expand WS1 (cursor is initially on WS1)
+        await pilot.press("l")
+
+        # Go down to F1_A
+        await pilot.press("j")
+        assert tree.cursor_node.data == f1_a.id
+
+        # Press 'f' -> moves to F1_B
+        await pilot.press("f")
+        assert tree.cursor_node.data == f1_b.id
+
+        # Press 'f' -> wraps to F1_A (since WS2's folder is outside current WS scope)
+        await pilot.press("f")
+        assert tree.cursor_node.data == f1_a.id
+
+        # Press 'F' (Shift+F) -> wraps back to F1_B
+        await pilot.press("F")
+        assert tree.cursor_node.data == f1_b.id
+
+        # Press 'shift+f' -> back to F1_A
+        await pilot.press("shift+f")
+        assert tree.cursor_node.data == f1_a.id
+
+
+@pytest.mark.asyncio
+async def test_folder_navigation_collapsed_descendants_excluded(
+    session: Session,
+) -> None:
+    """Test collapsed Folder descendants are excluded from traversal."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+    f1_a = repo.create(
+        Node(name="F1_A", node_kind="folder", parent_id=ws1.id, sort_order=1)
+    )
+    repo.create(Node(name="F1_B", node_kind="folder", parent_id=f1_a.id, sort_order=1))
+    f1_c = repo.create(
+        Node(name="F1_C", node_kind="folder", parent_id=ws1.id, sort_order=2)
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Expand WS1 but leave F1_A collapsed
+        await pilot.press("l")
+
+        # Go down to F1_A
+        await pilot.press("j")
+        assert tree.cursor_node.data == f1_a.id
+
+        # Since F1_A is collapsed, F1_B is not visible.
+        # Pressing 'f' should move directly from F1_A to F1_C
+        await pilot.press("f")
+        assert tree.cursor_node.data == f1_c.id
+
+        # Press 'f' again -> wraps to F1_A
+        await pilot.press("f")
+        assert tree.cursor_node.data == f1_a.id
+
+
+@pytest.mark.asyncio
+async def test_folder_navigation_from_resource(session: Session) -> None:
+    """Test Folder navigation from a Resource uses containing Workspace."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+    f1_a = repo.create(
+        Node(name="F1_A", node_kind="folder", parent_id=ws1.id, sort_order=1)
+    )
+    f1_b = repo.create(
+        Node(name="F1_B", node_kind="folder", parent_id=ws1.id, sort_order=2)
+    )
+    res1 = repo.create(
+        Node(
+            name="Res1",
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=f1_a.id,
+            sort_order=1,
+        )
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Expand everything under WS1
+        await pilot.press("l")  # expand WS1
+        await pilot.press("j")  # move to F1_A
+        await pilot.press("l")  # expand F1_A
+        await pilot.press("j")  # move to Res1
+        assert tree.cursor_node.data == res1.id
+
+        # Press 'f' -> should navigate to Folder in containing WS1.
+        # Candidates in WS1 are [F1_A, F1_B].
+        # Current index of Res1 is between F1_A and F1_B.
+        # So 'f' (direction=1) should select F1_B!
+        await pilot.press("f")
+        assert tree.cursor_node.data == f1_b.id
+
+
+@pytest.mark.asyncio
+async def test_folder_navigation_fallback(session: Session) -> None:
+    """Test Folder navigation fallback works when no Workspace context exists."""
+    repo = NodeRepository(session)
+    # Bypassing validate_parent by creating directly:
+    f_root = repo.create(
+        Node(name="Root Folder", node_kind="folder", parent_id=None, sort_order=1)
+    )
+    f_root2 = repo.create(
+        Node(name="Root Folder 2", node_kind="folder", parent_id=None, sort_order=2)
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Initially, cursor is on Root Folder
+        assert tree.cursor_node.data == f_root.id
+
+        # Press 'f' -> moves to Root Folder 2 (fallback)
+        await pilot.press("f")
+        assert tree.cursor_node.data == f_root2.id
+
+
+@pytest.mark.asyncio
+async def test_navigation_one_or_zero_matches(session: Session) -> None:
+    """Test that one or zero matching nodes cause no errors and behave safely."""
+    repo = NodeRepository(session)
+    ws1 = repo.create(Node(name="WS1", node_kind="workspace", sort_order=1))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # Case 1: One matching Workspace (WS1 itself).
+        # Pressing 'w' should safely remain on WS1.
+        await pilot.press("w")
+        assert tree.cursor_node.data == ws1.id
+
+        # Case 2: Zero matching Folders.
+        # Pressing 'f' should safely do nothing and remain on WS1.
+        await pilot.press("f")
+        assert tree.cursor_node.data == ws1.id
+
+
 class KeyboardShortcutTestApp(App[None]):
     """Test app with PathAutocomplete and a subsequent Input widget."""
 

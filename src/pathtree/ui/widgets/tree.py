@@ -30,6 +30,12 @@ class NodeTreeView(Tree[uuid.UUID]):
         Binding("m", "move_node", "Move Node", show=False),
         Binding("d", "delete_node", "Delete Node", show=False),
         Binding("delete", "delete_node", "Delete Node", show=False),
+        Binding("w", "next_workspace", "Next Workspace", show=False),
+        Binding("W", "prev_workspace", "Prev Workspace", show=False),
+        Binding("shift+w", "prev_workspace", "Prev Workspace", show=False),
+        Binding("f", "next_folder", "Next Folder", show=False),
+        Binding("F", "prev_folder", "Prev Folder", show=False),
+        Binding("shift+f", "prev_folder", "Prev Folder", show=False),
     ]
 
     class FocusSearch(Message):
@@ -157,6 +163,131 @@ class NodeTreeView(Tree[uuid.UUID]):
     def action_delete_node(self) -> None:
         """Post DeleteNode message."""
         self.post_message(self.DeleteNode())
+
+    def get_visible_nodes(self) -> list[TextualTreeNode[uuid.UUID]]:
+        """Get all visible nodes in depth-first pre-order tree traversal."""
+        visible = []
+
+        def traverse(node: TextualTreeNode[uuid.UUID]) -> None:
+            if node != self.root:
+                visible.append(node)
+            # Traverse children only if the node is root OR is expanded
+            if node == self.root or node.is_expanded:
+                for child in node.children:
+                    traverse(child)
+
+        traverse(self.root)
+        return visible
+
+    def _find_containing_workspace_id(
+        self, tree_node: TextualTreeNode[uuid.UUID]
+    ) -> uuid.UUID | None:
+        """Find the UUID of the workspace node containing the given tree node."""
+        curr = tree_node
+        while curr is not None and curr != self.root:
+            if curr.data is not None:
+                db_node = self.node_service.get_node(curr.data)
+                if db_node and db_node.node_kind == "workspace":
+                    return db_node.id
+            curr = curr.parent
+        return None
+
+    def _navigate_by_kind(self, target_kind: str, direction: int) -> None:
+        """Shared helper to navigate between visible Workspace or Folder nodes."""
+        visible_nodes = self.get_visible_nodes()
+        if not visible_nodes:
+            return
+
+        current_node = self.cursor_node
+        if current_node is None:
+            return
+
+        workspace_scope_id = None
+        if target_kind == "folder":
+            workspace_scope_id = self._find_containing_workspace_id(current_node)
+
+        candidates = []
+        for node in visible_nodes:
+            if node.data is None:
+                continue
+            db_node = self.node_service.get_node(node.data)
+            if not db_node:
+                continue
+
+            if db_node.node_kind != target_kind:
+                continue
+
+            if target_kind == "folder" and workspace_scope_id is not None:
+                node_ws_id = self._find_containing_workspace_id(node)
+                if node_ws_id != workspace_scope_id:
+                    continue
+
+            candidates.append(node)
+
+        if not candidates:
+            return
+
+        if len(candidates) == 1:
+            target = candidates[0]
+            if current_node != target:
+                self.move_cursor(target)
+                self.scroll_to_node(target)
+            return
+
+        if current_node in candidates:
+            curr_idx = candidates.index(current_node)
+            next_idx = (curr_idx + direction) % len(candidates)
+            target = candidates[next_idx]
+        else:
+            try:
+                current_visible_idx = visible_nodes.index(current_node)
+            except ValueError:
+                current_visible_idx = -1
+
+            if direction == 1:
+                target = None
+                for cand in candidates:
+                    try:
+                        cand_vis_idx = visible_nodes.index(cand)
+                    except ValueError:
+                        continue
+                    if cand_vis_idx > current_visible_idx:
+                        target = cand
+                        break
+                if target is None:
+                    target = candidates[0]
+            else:
+                target = None
+                for cand in reversed(candidates):
+                    try:
+                        cand_vis_idx = visible_nodes.index(cand)
+                    except ValueError:
+                        continue
+                    if cand_vis_idx < current_visible_idx:
+                        target = cand
+                        break
+                if target is None:
+                    target = candidates[-1]
+
+        if target is not None:
+            self.move_cursor(target)
+            self.scroll_to_node(target)
+
+    def action_next_workspace(self) -> None:
+        """Jump to the next visible Workspace node."""
+        self._navigate_by_kind("workspace", 1)
+
+    def action_prev_workspace(self) -> None:
+        """Jump to the previous visible Workspace node."""
+        self._navigate_by_kind("workspace", -1)
+
+    def action_next_folder(self) -> None:
+        """Jump to the next visible Folder node."""
+        self._navigate_by_kind("folder", 1)
+
+    def action_prev_folder(self) -> None:
+        """Jump to the previous visible Folder node."""
+        self._navigate_by_kind("folder", -1)
 
     def action_collapse_or_parent(self) -> None:
         """Collapse active directory node or go to parent if already collapsed."""
