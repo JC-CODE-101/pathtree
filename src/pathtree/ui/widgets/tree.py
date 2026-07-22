@@ -179,19 +179,6 @@ class NodeTreeView(Tree[uuid.UUID]):
         traverse(self.root)
         return visible
 
-    def _find_containing_workspace_id(
-        self, tree_node: TextualTreeNode[uuid.UUID]
-    ) -> uuid.UUID | None:
-        """Find the UUID of the workspace node containing the given tree node."""
-        curr = tree_node
-        while curr is not None and curr != self.root:
-            if curr.data is not None:
-                db_node = self.node_service.get_node(curr.data)
-                if db_node and db_node.node_kind == "workspace":
-                    return db_node.id
-            curr = curr.parent
-        return None
-
     def _navigate_by_kind(self, target_kind: str, direction: int) -> None:
         """Shared helper to navigate between visible Workspace or Folder nodes."""
         visible_nodes = self.get_visible_nodes()
@@ -202,15 +189,36 @@ class NodeTreeView(Tree[uuid.UUID]):
         if current_node is None:
             return
 
+        # 1. Single-pass DB query to load all node models
+        all_nodes = self.node_service.repository.list_all()
+        node_id_to_model = {n.id: n for n in all_nodes}
+
+        # 2. Map visible nodes to their index
+        visible_node_to_idx = {node: idx for idx, node in enumerate(visible_nodes)}
+
+        # Helper to find containing workspace ID using the mapping
+        def find_containing_workspace_id(
+            tree_node: TextualTreeNode[uuid.UUID],
+        ) -> uuid.UUID | None:
+            curr = tree_node
+            while curr is not None and curr != self.root:
+                if curr.data is not None:
+                    db_node = node_id_to_model.get(curr.data)
+                    if db_node and db_node.node_kind == "workspace":
+                        return db_node.id
+                curr = curr.parent
+            return None
+
         workspace_scope_id = None
         if target_kind == "folder":
-            workspace_scope_id = self._find_containing_workspace_id(current_node)
+            workspace_scope_id = find_containing_workspace_id(current_node)
 
+        # 3. Filter candidates
         candidates = []
         for node in visible_nodes:
             if node.data is None:
                 continue
-            db_node = self.node_service.get_node(node.data)
+            db_node = node_id_to_model.get(node.data)
             if not db_node:
                 continue
 
@@ -218,7 +226,7 @@ class NodeTreeView(Tree[uuid.UUID]):
                 continue
 
             if target_kind == "folder" and workspace_scope_id is not None:
-                node_ws_id = self._find_containing_workspace_id(node)
+                node_ws_id = find_containing_workspace_id(node)
                 if node_ws_id != workspace_scope_id:
                     continue
 
@@ -234,23 +242,20 @@ class NodeTreeView(Tree[uuid.UUID]):
                 self.scroll_to_node(target)
             return
 
-        if current_node in candidates:
-            curr_idx = candidates.index(current_node)
+        # Map each candidate to its index in the candidates list
+        candidate_to_idx = {cand: idx for idx, cand in enumerate(candidates)}
+
+        if current_node in candidate_to_idx:
+            curr_idx = candidate_to_idx[current_node]
             next_idx = (curr_idx + direction) % len(candidates)
             target = candidates[next_idx]
         else:
-            try:
-                current_visible_idx = visible_nodes.index(current_node)
-            except ValueError:
-                current_visible_idx = -1
+            current_visible_idx = visible_node_to_idx.get(current_node, -1)
 
             if direction == 1:
                 target = None
                 for cand in candidates:
-                    try:
-                        cand_vis_idx = visible_nodes.index(cand)
-                    except ValueError:
-                        continue
+                    cand_vis_idx = visible_node_to_idx.get(cand, -1)
                     if cand_vis_idx > current_visible_idx:
                         target = cand
                         break
@@ -259,10 +264,7 @@ class NodeTreeView(Tree[uuid.UUID]):
             else:
                 target = None
                 for cand in reversed(candidates):
-                    try:
-                        cand_vis_idx = visible_nodes.index(cand)
-                    except ValueError:
-                        continue
+                    cand_vis_idx = visible_node_to_idx.get(cand, -1)
                     if cand_vis_idx < current_visible_idx:
                         target = cand
                         break
