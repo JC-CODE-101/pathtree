@@ -6,6 +6,7 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Tree
 
@@ -169,7 +170,7 @@ class MainScreen(Screen[None]):
         """Update the state object with latest user expansion and selection."""
         try:
             tree = self.query_one("#tree-view", NodeTreeView)
-        except Exception:
+        except NoMatches:
             return
 
         if tree.load_error:

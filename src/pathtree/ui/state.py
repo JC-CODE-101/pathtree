@@ -56,7 +56,7 @@ class TreeStateStore:
                 if not content:
                     return TreeState()
                 data = json.loads(content)
-        except Exception as e:
+        except (OSError, UnicodeError, json.JSONDecodeError) as e:
             logger.warning("Failed to read or parse tree state file: %s", e)
             return TreeState()
 
@@ -115,7 +115,7 @@ class TreeStateStore:
 
             # Atomic replace
             os.replace(temp_file_path, self.state_file_path)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error("Failed to save tree state: %s", e)
             # Cleanup temp file if it still exists
             if temp_file_path is not None and temp_file_path.exists():
