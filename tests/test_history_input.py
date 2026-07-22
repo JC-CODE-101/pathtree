@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session
 from textual.app import App, ComposeResult
-from textual.widgets._input import Selection
 
 from pathtree.database.repository import NodeRepository
 from pathtree.models.node import Node
@@ -34,7 +33,7 @@ async def test_independent_history() -> None:
 
         # Focus name and select all, then backspace to clear
         name_input.focus()
-        name_input.selection = Selection(0, len(name_input.value))
+        name_input.selection = (0, len(name_input.value))
         await pilot.pause()
         await pilot.press("backspace")
         assert name_input.value == ""
@@ -42,7 +41,7 @@ async def test_independent_history() -> None:
 
         # Focus desc and select all, then backspace to clear
         desc_input.focus()
-        desc_input.selection = Selection(0, len(desc_input.value))
+        desc_input.selection = (0, len(desc_input.value))
         await pilot.pause()
         await pilot.press("backspace")
         assert desc_input.value == ""
@@ -95,7 +94,7 @@ async def test_ctrl_z_restores_fields(session: Session, tmp_path: Path) -> None:
 
         # 1. Test Name Undo
         name_input.focus()
-        name_input.selection = Selection(0, len(name_input.value))
+        name_input.selection = (0, len(name_input.value))
         await pilot.pause()
         await pilot.press("backspace")
         assert name_input.value == ""
@@ -104,7 +103,7 @@ async def test_ctrl_z_restores_fields(session: Session, tmp_path: Path) -> None:
 
         # 2. Test Path Undo
         path_input.focus()
-        path_input.selection = Selection(0, len(path_input.value))
+        path_input.selection = (0, len(path_input.value))
         await pilot.pause()
         await pilot.press("backspace")
         assert path_input.value == ""
@@ -113,7 +112,7 @@ async def test_ctrl_z_restores_fields(session: Session, tmp_path: Path) -> None:
 
         # 3. Test Description Undo
         desc_input.focus()
-        desc_input.selection = Selection(0, len(desc_input.value))
+        desc_input.selection = (0, len(desc_input.value))
         await pilot.pause()
         await pilot.press("backspace")
         assert desc_input.value == ""
@@ -122,7 +121,7 @@ async def test_ctrl_z_restores_fields(session: Session, tmp_path: Path) -> None:
 
         # 4. Test Icon Undo
         icon_input.focus()
-        icon_input.selection = Selection(0, len(icon_input.value))
+        icon_input.selection = (0, len(icon_input.value))
         await pilot.pause()
         await pilot.press("backspace")
         assert icon_input.value == ""
@@ -142,15 +141,16 @@ async def test_shift_e_behavior() -> None:
 
         # Focus and select all
         name_input.focus()
-        name_input.selection = Selection(0, len(name_input.value))
+        name_input.selection = (0, len(name_input.value))
         await pilot.pause()
 
         # Press E (Shift+E)
         await pilot.press("E")
         assert name_input.value == "Initial Name"
         # Selection must be cleared and cursor placed at the end
-        assert name_input.selection == Selection(
-            len(name_input.value), len(name_input.value)
+        assert (name_input.selection.start, name_input.selection.end) == (
+            len(name_input.value),
+            len(name_input.value),
         )
         assert app.focused == name_input
 
@@ -188,7 +188,7 @@ async def test_shift_e_does_not_submit_or_close_dialog(session: Session) -> None
 
         name_input = dialog.query_one("#input-name", HistoryInput)
         name_input.focus()
-        name_input.selection = Selection(0, len(name_input.value))
+        name_input.selection = (0, len(name_input.value))
         await pilot.pause()
 
         # Press E (Shift+E) to collapse selection
@@ -198,8 +198,9 @@ async def test_shift_e_does_not_submit_or_close_dialog(session: Session) -> None
         # Dialog must remain open
         assert app.screen == dialog
         assert name_input.value == "Dialog Node"
-        assert name_input.selection == Selection(
-            len(name_input.value), len(name_input.value)
+        assert (name_input.selection.start, name_input.selection.end) == (
+            len(name_input.value),
+            len(name_input.value),
         )
 
         # Cancel dialog
