@@ -8,4 +8,4 @@ echo "=== Running Ruff Lint Check ==="
 ruff check src tests
 
 echo "=== Running pytest ==="
-python3 -m pytest
+uv run pytest

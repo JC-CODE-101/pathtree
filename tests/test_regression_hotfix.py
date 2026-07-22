@@ -195,8 +195,8 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
 
     - submitting Add with Enter creates exactly one node;
     - the underlying MainScreen activation action is not called;
-    - no "has no configured path" error appears after Folder creation;
-    - no "has no configured path" error appears after Workspace creation;
+    - no "No default action is available" error appears after Folder creation;
+    - no "No default action is available" error appears after Workspace creation;
     - Edit submission does not activate the edited node;
     - Move submission does not activate the moved node;
     - Delete confirmation does not activate the fallback node;
@@ -233,8 +233,8 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
         assert app.screen.id == "main-screen"
         assert len(node_service.load_root_nodes()) == 2
         # MainScreen details panel should NOT show any
-        # activation errors (like "has no configured path")
-        assert "has no configured path" not in details.render().plain
+        # activation errors (like "No default action is available")
+        assert "No default action is available" not in details.render().plain
 
         # 2. Submit Add Folder with Enter key
         # Expand WS first
@@ -254,8 +254,8 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
         await pilot.pause(0.05)
 
         assert app.screen.id == "main-screen"
-        # No "has no configured path" error in details
-        assert "has no configured path" not in details.render().plain
+        # No "No default action is available" error in details
+        assert "No default action is available" not in details.render().plain
         assert output_file.exists() is False
 
         # 3. Edit submission with enter key does not activate
@@ -268,7 +268,7 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
         await pilot.pause(0.05)
 
         assert app.screen.id == "main-screen"
-        assert "has no configured path" not in details.render().plain
+        assert "No default action is available" not in details.render().plain
         assert output_file.exists() is False
 
         # 4. Move submission with enter key does not activate
@@ -283,7 +283,7 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
         await pilot.pause(0.05)
 
         assert app.screen.id == "main-screen"
-        assert "has no configured path" not in details.render().plain
+        assert "No default action is available" not in details.render().plain
         assert output_file.exists() is False
 
         # 5. Delete confirmation with enter key does not activate fallback node
@@ -295,7 +295,7 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
         await pilot.pause(0.05)
 
         assert app.screen.id == "main-screen"
-        assert "has no configured path" not in details.render().plain
+        assert "No default action is available" not in details.render().plain
         assert output_file.exists() is False
 
         # 6. Explicit Enter while the tree has focus still activates a valid Directory
@@ -363,14 +363,14 @@ async def test_details_synchronization_regressions(
         await pilot.pause(0.01)
 
         # Trigger a stale activation error by intentionally trying
-        # to activate "Assets" (Folder has no configured path)
+        # to activate "Assets" (Folder has no default action)
         tree.move_cursor(next(c for c in ws_tn.children if c.data == assets.id))
         await pilot.pause(0.01)
         await pilot.press("enter")
         await pilot.pause(0.01)
 
         # Stale activation error should be visible
-        assert "has no configured path" in details.render().plain
+        assert "No default action is available" in details.render().plain
 
         # 1. Add node - verify details show newly created node
         # and clear the stale activation error
@@ -391,7 +391,7 @@ async def test_details_synchronization_regressions(
         # Intentionally produce error again
         await pilot.press("enter")
         await pilot.pause(0.01)
-        assert "has no configured path" in details.render().plain
+        assert "No default action is available" in details.render().plain
 
         # 2. Move node - details show moved node and clear stale activation error
         await pilot.press("m")
@@ -408,7 +408,7 @@ async def test_details_synchronization_regressions(
         # Intentionally produce error again
         await pilot.press("enter")
         await pilot.pause(0.01)
-        assert "has no configured path" in details.render().plain
+        assert "No default action is available" in details.render().plain
 
         # 3. Delete node - details show selected fallback
         # and clear stale activation error
