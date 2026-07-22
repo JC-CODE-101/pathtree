@@ -10,8 +10,10 @@ from textual.widget import Widget
 from textual.widgets import Input, OptionList
 from textual.widgets.option_list import Option
 
+from pathtree.ui.widgets.history_input import HistoryInput
 
-class PathAutocompleteInput(Input):
+
+class PathAutocompleteInput(HistoryInput):
     """Custom Input subclass that allows key interception by parent PathAutocomplete."""
 
     def on_key(self, event: events.Key) -> None:
@@ -20,6 +22,9 @@ class PathAutocompleteInput(Input):
             if self.parent.handle_input_key(event):
                 event.prevent_default()
                 event.stop()
+                return
+
+        super().on_key(event)
 
     def on_blur(self, event: events.Blur) -> None:
         """Forward blur event to parent PathAutocomplete for deferred handling."""
