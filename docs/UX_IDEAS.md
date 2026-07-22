@@ -55,14 +55,15 @@ This document collects small UX improvements and quality-of-life ideas for PathT
 - Provide a settings/options view for inspecting, changing and resetting shortcut assignments.
 - Detect conflicting assignments before saving a profile.
 
-## Workspace Structure Templates
-- Allow copying a Workspace or Folder subtree as structure only, without copying path values, commands, URLs, credentials or other environment-specific data.
-- Preserve the hierarchy, node kinds, resource types, names and optionally icons/descriptions.
-- Allow saving a reusable structure as a named template.
-- Create a new Workspace from a selected template.
-- Prompt for or leave empty all values that must be supplied for the new workflow.
-- Keep direct one-time duplication and reusable templates as separate concepts.
-- Consider template variables/placeholders for future use, such as `${PROJECT_ROOT}`, `${VENV}` or `${REPO}`.
+## Reusable Structure Templates
+- Save frequently used Folder/Resource arrangements as reusable named templates.
+- Templates are not tied to Blender or programming projects; they may represent general structures such as `System -> Resources`, `Web -> Resources`, `Development -> Resources` or any custom workflow.
+- Apply a template inside a new or existing Workspace so common structures do not need to be rebuilt manually.
+- Preserve hierarchy, names, node kinds, resource types and optionally icons/descriptions.
+- Leave environment-specific values empty by default, including paths, commands, URLs, credentials and machine-specific configuration.
+- Allow a template to contain only part of a Workspace, not necessarily the whole Workspace.
+- Keep one-time subtree duplication and reusable templates as separate concepts.
+- Consider template variables/placeholders for future use, such as `${PROJECT_ROOT}`, `${HOME}`, `${VENV}` or `${REPO}`.
 - Treat this as an experimental future feature until repeated real-world use confirms the need.
 
 ## Path Handling
