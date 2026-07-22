@@ -4,6 +4,7 @@ from typing import Any
 
 from textual import events
 from textual.widgets import Input
+from textual.widgets.input import Selection
 
 
 class HistoryInput(Input):
@@ -12,14 +13,11 @@ class HistoryInput(Input):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         """Initialize the input and set up state for tracking undo history."""
         super().__init__(*args, **kwargs)
-        self._undo_history: list[tuple[str, tuple[int, int]]] = []
+        self._undo_history: list[tuple[str, Selection]] = []
         self._is_undoing: bool = False
         self._last_value: str = self.value
-        self._last_selection: tuple[int, int] = (
-            self.selection.start,
-            self.selection.end,
-        )
-        self._pre_key_state: tuple[str, tuple[int, int]] | None = None
+        self._last_selection: Selection = self.selection
+        self._pre_key_state: tuple[str, Selection] | None = None
 
     def watch_value(self, value: str) -> None:
         """React to changes in value, storing the previous state in history."""
@@ -33,7 +31,7 @@ class HistoryInput(Input):
                 old_sel = getattr(
                     self,
                     "_last_selection",
-                    (self.selection.start, self.selection.end),
+                    self.selection,
                 )
 
             if old_val is not None and value != old_val:
@@ -44,11 +42,11 @@ class HistoryInput(Input):
         self._last_value = value
         self._pre_key_state = None
 
-    def watch_selection(self, selection: Any) -> None:
+    def watch_selection(self, selection: Selection) -> None:
         """React to changes in selection, updating the last-known selection."""
         is_undoing = getattr(self, "_is_undoing", False)
         if not is_undoing:
-            self._last_selection = (selection.start, selection.end)
+            self._last_selection = selection
 
     def on_key(self, event: events.Key) -> None:
         """Intercept key events to handle Ctrl+Z and Shift+E."""
@@ -72,7 +70,7 @@ class HistoryInput(Input):
                 return
 
         # Record the current state before Textual handles the key event
-        self._pre_key_state = (self.value, (self.selection.start, self.selection.end))
+        self._pre_key_state = (self.value, self.selection)
 
     def undo(self) -> None:
         """Restore the input to its previous state from the undo history."""
