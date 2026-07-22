@@ -10,6 +10,11 @@ from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Tree
 
+from pathtree.actions import (
+    DirectoryActionProvider,
+    ResourceActionContext,
+    ResourceActionRegistry,
+)
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.dialogs.add_node import AddNodeDialog
 from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog, DeleteResult
@@ -64,6 +69,12 @@ class MainScreen(Screen[None]):
         self._pre_search_expanded_node_ids: set[uuid.UUID] | None = None
         self._db_is_empty: bool = False
         self._current_tree_state: TreeState = TreeState()
+
+        # Initialize Action Registry and Register Directory Provider
+        self.action_registry = ResourceActionRegistry()
+        self.action_registry.register(
+            "resource", "directory", DirectoryActionProvider(self.node_service)
+        )
 
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""
@@ -233,20 +244,37 @@ class MainScreen(Screen[None]):
     def activate_node(self, node_id: uuid.UUID) -> None:
         """Resolve node path and handle activation."""
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
-        if not self.output_path:
+
+        node = self.node_service.get_node(node_id)
+        if not node:
+            details_panel.update_error(f"Node {node_id} does not exist.")
+            return
+
+        provider = self.action_registry.get_provider(node.node_kind, node.resource_type)
+        if not provider:
             details_panel.update_error(
-                "No output file specified. Activation requires the --output option."
+                f"Node '{node.name}' ({node.id}) has no configured path."
             )
             return
 
-        try:
-            resolved_path = self.node_service.resolve_node_path(node_id)
-            with open(self.output_path, "w", encoding="utf-8") as f:
-                f.write(str(resolved_path.absolute()))
+        context = ResourceActionContext(
+            node=node,
+            output_path=self.output_path,
+        )
+        default_action = provider.get_default_action(context)
+        if not default_action:
+            details_panel.update_error(f"No default action defined for '{node.name}'.")
+            return
+
+        result = provider.execute(default_action.id, context)
+
+        if not result.success:
+            details_panel.update_error(result.error_message or "Action failed.")
+            return
+
+        if result.exit_app:
             self.save_state()
             self.app.exit(return_code=0)
-        except (NodeServiceError, OSError) as e:
-            details_panel.update_error(str(e))
 
     # --- Search Input Interactions & Event Handlers ---
 
