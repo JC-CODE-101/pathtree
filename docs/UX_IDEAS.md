@@ -26,10 +26,25 @@ This document collects small UX improvements and quality-of-life ideas for PathT
 - `.` jumps to the next resource of the selected type.
 - `Shift+.` jumps to the previous resource of the selected type.
 
+## Resource Actions
+- `Enter` performs the default action for the selected resource.
+- Directory/path resources switch the current shell directory through the existing shell adapter.
+- Executable and Script resources may run their configured default action.
+- URL resources open through the configured browser or URL handler.
+- `O` opens a context-sensitive action menu for the selected resource.
+- The action menu only shows operations valid for that resource type.
+- Example Script actions: Run, Edit, Open containing directory, Copy path, View details.
+- Example Directory actions: Change directory, Open in file manager, Open terminal here, Copy path, View details.
+- Example URL actions: Open, Copy URL, Edit, View details.
+- Allow multiple editors or runners to be configured.
+- One editor/runner may be selected as the default action used by `Enter`.
+- The context menu may allow choosing a different configured editor/runner for a single action without changing the default.
+
 ## Context-sensitive Status Bar
 - Show only shortcuts valid for the currently selected node and active UI mode.
 - Display different shortcuts for Workspace, Folder and Resource nodes.
 - Prefix commands such as `R` temporarily replace the normal status bar with context-specific shortcuts.
+- When a resource is selected, show `Enter` for its default action and `O` for additional actions.
 - Restore the normal status bar after the action completes or after `Esc`.
 
 ## Key Profiles
