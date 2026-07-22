@@ -17,6 +17,7 @@ from textual.widgets import (
 
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.compat import resolve_optional_uuid
+from pathtree.ui.widgets.history_input import HistoryInput
 from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
@@ -127,7 +128,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
             with Vertical(classes="field-container"):
                 yield Label("Name *", classes="field-label")
-                yield Input(placeholder="Enter name...", id="input-name")
+                yield HistoryInput(placeholder="Enter name...", id="input-name")
 
             with Vertical(classes="field-container", id="path-field-container"):
                 yield Label("Path", classes="field-label")
@@ -137,14 +138,16 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
             with Vertical(classes="field-container"):
                 yield Label("Description", classes="field-label")
-                yield Input(
+                yield HistoryInput(
                     placeholder="Enter description (optional)...",
                     id="input-description",
                 )
 
             with Vertical(classes="field-container"):
                 yield Label("Icon", classes="field-label")
-                yield Input(placeholder="Enter icon (optional)...", id="input-icon")
+                yield HistoryInput(
+                    placeholder="Enter icon (optional)...", id="input-icon"
+                )
 
             with Vertical(classes="field-container", id="parent-field-container"):
                 yield Label("Parent", classes="field-label")

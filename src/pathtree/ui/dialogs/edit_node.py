@@ -7,6 +7,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Static
 
 from pathtree.services.node_service import NodeService, NodeServiceError
+from pathtree.ui.widgets.history_input import HistoryInput
 from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
@@ -105,7 +106,7 @@ class EditNodeDialog(ModalScreen[bool]):
 
             with Vertical(classes="field-container"):
                 yield Label("Name *", classes="field-label")
-                yield Input(
+                yield HistoryInput(
                     value=self.node.name,
                     placeholder="Enter name...",
                     id="input-name",
@@ -128,7 +129,7 @@ class EditNodeDialog(ModalScreen[bool]):
 
             with Vertical(classes="field-container"):
                 yield Label("Description", classes="field-label")
-                yield Input(
+                yield HistoryInput(
                     value=self.node.description or "",
                     placeholder="Enter description...",
                     id="input-description",
@@ -136,7 +137,7 @@ class EditNodeDialog(ModalScreen[bool]):
 
             with Vertical(classes="field-container"):
                 yield Label("Icon", classes="field-label")
-                yield Input(
+                yield HistoryInput(
                     value=self.node.icon or "",
                     placeholder="Enter icon...",
                     id="input-icon",
@@ -144,7 +145,7 @@ class EditNodeDialog(ModalScreen[bool]):
 
             with Vertical(classes="field-container"):
                 yield Label("Sort Order", classes="field-label")
-                yield Input(
+                yield HistoryInput(
                     value=str(self.node.sort_order),
                     placeholder="0",
                     id="input-sort-order",
