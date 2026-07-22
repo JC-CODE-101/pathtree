@@ -55,6 +55,16 @@ This document collects small UX improvements and quality-of-life ideas for PathT
 - Provide a settings/options view for inspecting, changing and resetting shortcut assignments.
 - Detect conflicting assignments before saving a profile.
 
+## Workspace Structure Templates
+- Allow copying a Workspace or Folder subtree as structure only, without copying path values, commands, URLs, credentials or other environment-specific data.
+- Preserve the hierarchy, node kinds, resource types, names and optionally icons/descriptions.
+- Allow saving a reusable structure as a named template.
+- Create a new Workspace from a selected template.
+- Prompt for or leave empty all values that must be supplied for the new workflow.
+- Keep direct one-time duplication and reusable templates as separate concepts.
+- Consider template variables/placeholders for future use, such as `${PROJECT_ROOT}`, `${VENV}` or `${REPO}`.
+- Treat this as an experimental future feature until repeated real-world use confirms the need.
+
 ## Path Handling
 - File-system browser instead of manually typing paths.
 - Better directory/file filtering depending on node type.
