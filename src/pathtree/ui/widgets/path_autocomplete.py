@@ -183,10 +183,10 @@ class PathAutocomplete(Widget):
         if not self.is_suggestions_visible:
             return False
 
-        if key in ("down", "ctrl+n"):
+        if key in ("down", "ctrl+n", "ctrl+j") or "ctrl+j" in aliases:
             self.move_highlight(1)
             return True
-        elif key in ("up", "ctrl+p"):
+        elif key in ("up", "ctrl+p", "ctrl+k") or "ctrl+k" in aliases:
             self.move_highlight(-1)
             return True
         elif key == "tab":
