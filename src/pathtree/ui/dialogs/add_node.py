@@ -17,6 +17,7 @@ from textual.widgets import (
 
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.compat import resolve_optional_uuid
+from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
 class AddNodeDialog(ModalScreen[uuid.UUID | None]):
@@ -34,6 +35,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         background: $panel;
         border: thick $accent;
         padding: 1 2;
+        layers: base overlay;
     }
 
     .title {
@@ -75,6 +77,28 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
     Button {
         margin-left: 2;
     }
+
+    PathAutocomplete {
+        width: 100%;
+        height: 3;
+        min-height: 3;
+    }
+
+    PathAutocomplete .path-autocomplete-input {
+        width: 100%;
+        height: 100%;
+    }
+
+    .path-suggestions-list {
+        display: none;
+        position: absolute;
+        offset: 0 3;
+        width: 100%;
+        max-height: 8;
+        background: $panel;
+        border: solid $accent;
+        layer: overlay;
+    }
     """
 
     def __init__(
@@ -107,7 +131,9 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
             with Vertical(classes="field-container", id="path-field-container"):
                 yield Label("Path", classes="field-label")
-                yield Input(placeholder="Enter path (optional)...", id="input-path")
+                yield PathAutocomplete(
+                    placeholder="Enter path (optional)...", id="input-path"
+                )
 
             with Vertical(classes="field-container"):
                 yield Label("Description", classes="field-label")
@@ -225,10 +251,16 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         if event.input.id == "input-path" and self.selected_type == "directory":
             path_val = event.value.strip()
             warning_area = self.query_one("#warning-area", Static)
-            if path_val and not os.path.exists(os.path.expanduser(path_val)):
-                warning_area.update(
-                    "Path does not currently exist. The entry will still be saved."
-                )
+            if path_val:
+                from pathtree.utils.path import normalize_path
+
+                normalized = normalize_path(path_val)
+                if not os.path.exists(normalized):
+                    warning_area.update(
+                        "Path does not currently exist. The entry will still be saved."
+                    )
+                else:
+                    warning_area.update("")
             else:
                 warning_area.update("")
 
@@ -271,7 +303,12 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 return
             node_kind = "resource"
             resource_type = "directory"
-            path = self.query_one("#input-path", Input).value or None
+            path_val = self.query_one("#input-path", Input).value or None
+            path = None
+            if path_val is not None:
+                from pathtree.utils.path import normalize_path
+
+                path = normalize_path(path_val)
             is_temporary = self.query_one("#checkbox-temporary", Checkbox).value
 
         try:

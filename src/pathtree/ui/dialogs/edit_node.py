@@ -7,6 +7,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, Static
 
 from pathtree.services.node_service import NodeService, NodeServiceError
+from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
 class EditNodeDialog(ModalScreen[bool]):
@@ -24,6 +25,7 @@ class EditNodeDialog(ModalScreen[bool]):
         background: $panel;
         border: thick $accent;
         padding: 1 2;
+        layers: base overlay;
     }
 
     .title {
@@ -65,6 +67,28 @@ class EditNodeDialog(ModalScreen[bool]):
     Button {
         margin-left: 2;
     }
+
+    PathAutocomplete {
+        width: 100%;
+        height: 3;
+        min-height: 3;
+    }
+
+    PathAutocomplete .path-autocomplete-input {
+        width: 100%;
+        height: 100%;
+    }
+
+    .path-suggestions-list {
+        display: none;
+        position: absolute;
+        offset: 0 3;
+        width: 100%;
+        max-height: 8;
+        background: $panel;
+        border: solid $accent;
+        layer: overlay;
+    }
     """
 
     def __init__(self, node_service: NodeService, node_id: uuid.UUID) -> None:
@@ -94,7 +118,7 @@ class EditNodeDialog(ModalScreen[bool]):
             )
             with Vertical(classes="field-container", id="path-field-container") as vc:
                 yield Label("Path", classes="field-label")
-                yield Input(
+                yield PathAutocomplete(
                     value=self.node.path or "",
                     placeholder="Enter path...",
                     id="input-path",
@@ -156,10 +180,16 @@ class EditNodeDialog(ModalScreen[bool]):
         if event.input.id == "input-path" and is_directory:
             path_val = event.value.strip()
             warning_area = self.query_one("#warning-area", Static)
-            if path_val and not os.path.exists(os.path.expanduser(path_val)):
-                warning_area.update(
-                    "Path does not currently exist. The entry will still be saved."
-                )
+            if path_val:
+                from pathtree.utils.path import normalize_path
+
+                normalized = normalize_path(path_val)
+                if not os.path.exists(normalized):
+                    warning_area.update(
+                        "Path does not currently exist. The entry will still be saved."
+                    )
+                else:
+                    warning_area.update("")
             else:
                 warning_area.update("")
 
@@ -192,7 +222,11 @@ class EditNodeDialog(ModalScreen[bool]):
         )
         path = None
         if is_directory:
-            path = self.query_one("#input-path", Input).value or None
+            path_val = self.query_one("#input-path", Input).value or None
+            if path_val is not None:
+                from pathtree.utils.path import normalize_path
+
+                path = normalize_path(path_val)
 
         # Determine temporary promotion
         kwargs = {
