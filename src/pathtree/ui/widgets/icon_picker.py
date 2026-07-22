@@ -5,6 +5,7 @@ from typing import ClassVar
 from textual import events
 from textual.app import ComposeResult
 from textual.css.query import NoMatches
+from textual.dom import NoScreen
 from textual.widget import Widget
 from textual.widgets import Input, OptionList
 from textual.widgets.option_list import Option
@@ -385,7 +386,7 @@ class IconPicker(Widget):
             return
         try:
             focused = self.screen.focused
-        except Exception:
+        except (NoMatches, AttributeError, NoScreen):
             focused = None
 
         try:

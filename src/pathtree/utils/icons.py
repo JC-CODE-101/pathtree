@@ -51,12 +51,12 @@ UNICODE_SAFE_PACK = {
         ],
     },
     "folder": {
-        "default": IconOption("▸", "Arrow Right"),
+        "default": IconOption("⌂", "House"),
         "options": [
-            IconOption("▸", "Arrow Right"),
-            IconOption("▶", "Play Arrow"),
-            IconOption("▼", "Arrow Down"),
             IconOption("⌂", "House"),
+            IconOption("▣", "Nested Square"),
+            IconOption("▰", "Rectangle"),
+            IconOption("▱", "White Rectangle"),
         ],
     },
     "directory": {

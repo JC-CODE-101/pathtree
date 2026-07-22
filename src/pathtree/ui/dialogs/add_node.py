@@ -101,6 +101,28 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         border: solid $accent;
         layer: overlay;
     }
+
+    IconPicker {
+        width: 100%;
+        height: 3;
+        min-height: 3;
+    }
+
+    IconPicker .icon-picker-input {
+        width: 100%;
+        height: 100%;
+    }
+
+    .icon-suggestions-list {
+        display: none;
+        position: absolute;
+        offset: 0 3;
+        width: 100%;
+        max-height: 8;
+        background: $panel;
+        border: solid $accent;
+        layer: overlay;
+    }
     """
 
     def __init__(

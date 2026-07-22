@@ -20,7 +20,7 @@ def test_node_icon_catalog_resolution() -> None:
     # Workspace
     assert catalog.get_default_icon("workspace", None) == "◆"
     # Folder
-    assert catalog.get_default_icon("folder", None) == "▸"
+    assert catalog.get_default_icon("folder", None) == "⌂"
     # Directory Resource
     assert catalog.get_default_icon("resource", "directory") == "▪"
     # File Resource
@@ -194,8 +194,8 @@ async def test_changing_node_type_suggests_default(session: Session) -> None:
         # Toggle to Folder
         await pilot.click("#radio-folder")
         await pilot.pause(0.05)
-        # Should suggest default Folder icon '▸'
-        assert icon_picker.value == "▸"
+        # Should suggest default Folder icon '⌂'
+        assert icon_picker.value == "⌂"
 
         # Toggle to Directory
         await pilot.click("#radio-directory")
@@ -254,3 +254,60 @@ async def test_dialogs_remain_keyboard_operable(session: Session) -> None:
         await pilot.press("escape")
         await pilot.pause(0.05)
         assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
+async def test_edit_node_dialog_icon_picker_regression(session: Session) -> None:
+    """Rigorous layout regression test for EditNodeDialog and IconPicker.
+
+    Verifies:
+    1. IconPicker is present;
+    2. its inner input has a non-zero visible region (height == 3);
+    3. the existing node icon is displayed;
+    4. the picker can be focused and used;
+    5. submitting preserves or changes the icon correctly.
+    """
+    repo = NodeRepository(session)
+    node = repo.create(Node(name="Test Node", node_kind="workspace", icon="◇"))
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        # Trigger Edit Dialog
+        await pilot.press("e")
+        await pilot.pause(0.05)
+        dialog = app.screen
+        assert isinstance(dialog, EditNodeDialog)
+
+        # 1. Verify IconPicker is present
+        icon_picker = dialog.query_one(IconPicker)
+        assert icon_picker is not None
+
+        # 2. Verify its inner input has a non-zero visible region
+        inner_input = icon_picker.query_one(".icon-picker-input")
+        assert inner_input.region.height == 3
+        assert inner_input.region.width > 0
+
+        # 3. Verify the existing node icon is displayed
+        assert icon_picker.value == "◇"
+
+        # 4. Verify the picker can be focused and suggestions open
+        inner_input.focus()
+        await pilot.pause(0.05)
+        assert icon_picker.is_suggestions_visible is True
+
+        # Navigate down and accept (e.g. choose Default option)
+        icon_picker.option_list.highlighted = 0
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+
+        # 5. Submitting changes the icon correctly
+        dialog.action_submit()
+        await pilot.pause(0.05)
+        assert app.screen.id == "main-screen"
+
+        updated = node_service.get_node(node.id)
+        assert updated.icon == "◆"
