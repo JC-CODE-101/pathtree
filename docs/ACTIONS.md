@@ -232,3 +232,31 @@ This section describes the initial implementation of the resource-specific actio
 ## Safety Rules for Command Execution
 - Command execution on any resource type will **never** use `shell=True`.
 - Environment and subprocess invocations will be kept minimal, verified against explicit security allowlists, and separated from arguments to prevent command injection.
+
+## Resource Action Menu UI Flow
+
+Pressing `O` on a supported resource opens a context-sensitive, keyboard-friendly Action Menu containing available actions returned by the Action Framework.
+
+### Availability
+- Only opens when the selected node is a Resource.
+- Only opens when `ResourceActionRegistry` resolves a provider.
+- Only opens when the provider returns at least one available action.
+- For Workspace, Folder, or unsupported resources, a clear non-fatal message is shown in the details/error panel and the menu is not displayed.
+
+### Default vs Explicit Menu Actions
+- **Default Action**: Executed directly on double-click or Enter inside the main Tree (e.g., `change_directory` for directories).
+- **Explicit Menu Actions**: Displayed in the Resource Action Menu when pressing `O`. Items display the action label, optional description, a marker indicating which is the default action (`*`), and a disabled status if `is_enabled` is False.
+
+### Keyboard Controls
+- `j` / Down / `Ctrl+J`: Highlight next action (with wrapping).
+- `k` / Up / `Ctrl+K`: Highlight previous action (with wrapping).
+- `Enter`: Execute highlighted action.
+- `Escape`: Close menu without execution.
+- Highlighting does not execute actions. Tree selection and expansion states remain untouched.
+
+### Typed Result Handling
+The menu callback executes the selected action via the provider, yielding a `ResourceActionResult`:
+- `change_directory`: Preserves current output-file behavior, saves tree state, and exits app when `result.exit_app` is true.
+- `copy_path`: Keeps the app open and displays the returned path clearly in the details panel or a temporary message.
+- `view_details`: Keeps the app open and updates the details panel with the returned metadata.
+- If execution fails, `result.error_message` is displayed centrally in the details/error area.

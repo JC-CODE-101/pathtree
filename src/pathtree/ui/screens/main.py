@@ -16,6 +16,7 @@ from pathtree.actions import (
     ResourceActionRegistry,
 )
 from pathtree.services.node_service import NodeService, NodeServiceError
+from pathtree.ui.dialogs.action_menu import ActionMenuResult, ResourceActionMenu
 from pathtree.ui.dialogs.add_node import AddNodeDialog
 from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog, DeleteResult
 from pathtree.ui.dialogs.edit_node import EditNodeDialog
@@ -240,6 +241,101 @@ class MainScreen(Screen[None]):
         """Quit the application safely with exit code 0."""
         self.save_state()
         self.app.exit(return_code=0)
+
+    def on_node_tree_view_open_action_menu(
+        self, event: NodeTreeView.OpenActionMenu
+    ) -> None:
+        """Handle 'o' / 'O' key in tree to open Action Menu."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+        details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+
+        if tree.cursor_node is None or tree.cursor_node.data is None:
+            details_panel.update_error("No node selected.")
+            return
+
+        node_id = tree.cursor_node.data
+        node = self.node_service.get_node(node_id)
+        if node is None:
+            details_panel.update_error("Node not found.")
+            return
+
+        # 1. Selected node must be a Resource
+        if node.node_kind != "resource":
+            details_panel.update_error(
+                f"Action Menu is not available for {node.node_kind.capitalize()} nodes."
+            )
+            return
+
+        # 2. Registry must resolve a provider
+        provider = self.action_registry.get_provider(node.node_kind, node.resource_type)
+        if not provider:
+            res_type = node.resource_type or "None"
+            msg = f"No action provider found for resource type '{res_type}'."
+            details_panel.update_error(msg)
+            return
+
+        # 3. Provider must return at least one available action
+        context = ResourceActionContext(
+            node=node,
+            output_path=self.output_path,
+        )
+        actions = provider.get_available_actions(context)
+        if not actions:
+            details_panel.update_error("No available actions for this resource.")
+            return
+
+        def handle_action_menu_finished(result: ActionMenuResult | None) -> None:
+            tree.focus()
+            if result is not None and result.action_id is not None:
+                self.execute_action(result.action_id, provider, context)
+
+        self.app.push_screen(
+            ResourceActionMenu(actions, title=f"Actions for {node.name}"),
+            callback=handle_action_menu_finished,
+        )
+
+    def execute_action(
+        self,
+        action_id: str,
+        provider,
+        context: ResourceActionContext,
+    ) -> None:
+        """Execute action and centrally handle results."""
+        details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+
+        # Verify disabled actions cannot execute
+        actions = provider.get_available_actions(context)
+        action_obj = next((a for a in actions if a.id == action_id), None)
+        if action_obj is not None and not action_obj.is_enabled:
+            details_panel.update_error(f"Action '{action_obj.label}' is disabled.")
+            return
+
+        result = provider.execute(action_id, context)
+        if not result.success:
+            err = result.error_message or "Action execution failed."
+            details_panel.update_error(err)
+            return
+
+        if result.message:
+            self.app.notify(result.message)
+
+        if action_id == "change_directory":
+            if result.exit_app:
+                self.save_state()
+                self.app.exit(return_code=0)
+        elif action_id == "copy_path":
+            # Display returned path in the details panel or a temporary message
+            # and keep app open.
+            if result.output_value:
+                details_panel.update_error(f"Path: {result.output_value}")
+        elif action_id == "view_details":
+            # Display metadata in details panel & keep app open
+            if result.output_value:
+                details_panel.update(result.output_value)
+        else:
+            # Handle future action ids safely
+            if result.output_value:
+                details_panel.update(result.output_value)
 
     def activate_node(self, node_id: uuid.UUID) -> None:
         """Resolve node path and handle activation."""
