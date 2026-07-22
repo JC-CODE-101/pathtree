@@ -6,7 +6,7 @@ from pathtree.actions.base import (
     ResourceActionProvider,
     ResourceActionResult,
 )
-from pathtree.services.node_service import NodeService
+from pathtree.services.node_service import NodeService, NodeServiceError
 
 
 class DirectoryActionProvider(ResourceActionProvider):
@@ -72,7 +72,7 @@ class DirectoryActionProvider(ResourceActionProvider):
                 resolved_path = str(
                     self._node_service.resolve_node_path(context.node.id).absolute()
                 )
-        except Exception as e:
+        except (NodeServiceError, OSError, ValueError) as e:
             return ResourceActionResult(
                 success=False,
                 error_message=str(e),
@@ -96,7 +96,7 @@ class DirectoryActionProvider(ResourceActionProvider):
                     output_value=resolved_path,
                     message=f"Successfully changed directory to {resolved_path}",
                 )
-            except Exception as e:
+            except (OSError, UnicodeError) as e:
                 return ResourceActionResult(
                     success=False,
                     error_message=str(e),

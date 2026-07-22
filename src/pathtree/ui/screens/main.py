@@ -253,7 +253,7 @@ class MainScreen(Screen[None]):
         provider = self.action_registry.get_provider(node.node_kind, node.resource_type)
         if not provider:
             details_panel.update_error(
-                f"Node '{node.name}' ({node.id}) has no configured path."
+                "No default action is available for this node type."
             )
             return
 
