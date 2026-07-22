@@ -1326,7 +1326,7 @@ async def test_path_autocomplete_chained_tab_completion(
 async def test_path_autocomplete_chained_enter_completion(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Test chained Enter completion through multiple directory levels."""
+    """Test that Enter closes suggestions without accepting or modifying the path."""
     root = tmp_path / "root"
     code = root / "code"
     python = code / "python"
@@ -1346,21 +1346,12 @@ async def test_path_autocomplete_chained_enter_completion(
 
         assert widget.is_suggestions_visible is True
 
-        # First Enter accepts "code/"
+        # First Enter closes suggestions without accepting
         await pilot.press("enter")
         await pilot.pause(0.05)
 
-        assert input_widget.value == "root/code/"
-        assert widget.is_suggestions_visible is True
-        assert widget.option_list.option_count == 1
-        assert str(widget.option_list.get_option_at_index(0).prompt) == "python/"
-
-        # Second Enter accepts "python/"
-        await pilot.press("enter")
-        await pilot.pause(0.05)
-
-        assert input_widget.value == "root/code/python/"
-        assert widget.is_suggestions_visible is True
+        assert input_widget.value == "root/co"
+        assert widget.is_suggestions_visible is False
 
 
 @pytest.mark.asyncio
@@ -1559,7 +1550,7 @@ async def test_add_node_dialog_autocomplete_overlay_properties(
         assert option_list.highlighted == 0  # only 1 match (blocks/)
 
         # Accept visible option
-        await pilot.press("enter")
+        await pilot.press("tab")
         await pilot.pause(0.05)
         # Slices to empty match state on the newly accepted blocks/
         assert p_widget.is_suggestions_visible is True
@@ -1633,7 +1624,7 @@ async def test_edit_node_dialog_autocomplete_overlay_properties(
         assert app.focused is input_path
 
         # Accept visible option
-        await pilot.press("enter")
+        await pilot.press("tab")
         await pilot.pause(0.05)
         # Slices to empty match state on the newly accepted blocks/
         assert p_widget.is_suggestions_visible is True
@@ -1965,9 +1956,9 @@ async def test_add_node_dialog_autocomplete_enter_acceptance_and_creation(
         await pilot.pause(0.01)
         assert p_widget.is_suggestions_visible is True
 
-        # First Enter: accepts suggestion, immediately reopens with empty state
+        # First Tab: accepts suggestion, immediately reopens with empty state
         # (No matching directories)
-        await pilot.press("enter")
+        await pilot.press("tab")
         await pilot.pause(0.05)
         assert p_widget.is_suggestions_visible is True
         assert "No matching directories" in str(
@@ -1976,7 +1967,12 @@ async def test_add_node_dialog_autocomplete_enter_acceptance_and_creation(
         assert input_path.value == str(tmp_path) + "/suggested_folder/"
         assert isinstance(app.screen, AddNodeDialog)
 
-        # Second Enter: submits and creates
+        # Second Enter: closes suggestions
+        await pilot.press("enter")
+        await pilot.pause(0.05)
+        assert p_widget.is_suggestions_visible is False
+
+        # Third Enter: submits and creates
         await pilot.press("enter")
         await pilot.pause(0.05)
 
@@ -2031,7 +2027,7 @@ async def test_edit_node_dialog_autocomplete(session: Session, tmp_path: Path) -
         assert p_widget.is_suggestions_visible is True
 
         # Accept new path
-        await pilot.press("enter")
+        await pilot.press("tab")
         await pilot.pause(0.01)
         assert input_path.value == str(tmp_path) + "/new_dir/"
 
@@ -2098,7 +2094,7 @@ async def test_path_autocomplete_spaces(tmp_path: Path) -> None:
         await pilot.pause(0.01)
         assert p_widget.is_suggestions_visible is True
 
-        await pilot.press("enter")
+        await pilot.press("tab")
         await pilot.pause(0.01)
         assert input_path.value == str(tmp_path) + "/folder with spaces/"
 

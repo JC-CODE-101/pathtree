@@ -42,6 +42,11 @@ class PathAutocompleteOptionList(OptionList):
         if self.parent_widget and not event.option.disabled:
             self.parent_widget.accept_suggestion(str(event.option.prompt))
 
+    def on_blur(self, event: events.Blur) -> None:
+        """Forward blur event to parent PathAutocomplete for deferred handling."""
+        if self.parent_widget and hasattr(self.parent_widget, "on_blur"):
+            self.parent_widget.on_blur(event)
+
 
 class PathAutocomplete(Widget):
     """A reusable path autocomplete widget with directory suggestions."""
@@ -144,19 +149,30 @@ class PathAutocomplete(Widget):
             True if the key was handled and should be intercepted; False otherwise.
         """
         key = event.key
+        aliases = getattr(event, "aliases", [])
+        is_shift_enter = key == "shift+enter" or "shift+enter" in aliases
+        is_shift_space = key == "shift+space" or "shift+space" in aliases
 
         # Global PathAutocomplete shortcuts (recognized even when hidden)
-        if key == "shift+enter":
+        if is_shift_enter:
             self.hide_suggestions()
             if self.screen:
                 self.screen.focus_next()
             return True
-        elif key == "shift+space":
+        elif is_shift_space:
             input_widget = self.query_one(f"#{self.input_id}", Input)
             val = input_widget.value
             self.option_list.clear_options()
             self.update_suggestions(val)
             return True
+
+        # ESCAPE handling:
+        # "ESCAPE: close suggestions first; second Escape closes dialog."
+        if key == "escape":
+            if self.is_suggestions_visible:
+                self.hide_suggestions()
+                return True  # Consume escape so it doesn't close dialog immediately
+            return False  # Let escape bubble up to close the dialog
 
         # Popup-only keys (only recognized when suggestions are visible)
         if not self.is_suggestions_visible:
@@ -169,20 +185,19 @@ class PathAutocomplete(Widget):
             self.move_highlight(-1)
             return True
         elif key == "tab":
+            # "TAB: accept the highlighted suggestion; append selected directory;
+            # if result ends with '/', immediately scan/show its children;
+            # Tab is the only key used for chained directory completion."
             if self.has_valid_suggestion_highlighted():
                 self.accept_highlighted_suggestion()
                 return True
             # Let tab transition focus normally if no valid matches are present
             return False
         elif key == "enter":
-            if self.has_valid_suggestion_highlighted():
-                self.accept_highlighted_suggestion()
-                return True
-            else:
-                self.hide_suggestions()
-                return False  # Do NOT consume Enter. Let dialog process it.
-        elif key == "escape":
+            # "ENTER: do not accept highlighted suggestion; keep typed path exactly;
+            # close popup; do not automatically reopen; allow dialog Enter."
             self.hide_suggestions()
+            # Consume Enter when suggestions are open to avoid dialog submission
             return True
 
         return False
@@ -238,7 +253,7 @@ class PathAutocomplete(Widget):
         input_widget.focus()
 
         if new_value.endswith("/"):
-            # Rescan the accepted directory immediately in the next frame
+            # Rescan immediately in next frame (chained completion)
             self.call_after_refresh(self.update_suggestions, new_value)
         else:
             self.hide_suggestions()
@@ -316,7 +331,9 @@ class PathAutocomplete(Widget):
             typed_dir = ""
             typed_prefix = value
 
-        scandir_path = os.path.expanduser(typed_dir) if typed_dir else "."
+        from pathtree.utils.path import normalize_path
+
+        scandir_path = normalize_path(typed_dir) if typed_dir else "."
 
         # Build the set of resolved directory ancestors starting from scandir_path
         ancestors = set()

@@ -254,7 +254,10 @@ class NodeService:
         if not node.path:
             raise NoPathError(f"Node '{node.name}' ({node_id}) has no configured path.")
 
-        path = Path(node.path).resolve()
+        from pathtree.utils.path import normalize_path
+
+        normalized = normalize_path(node.path)
+        path = Path(normalized)
         if not path.exists():
             raise PathNotFoundError(
                 f"Path '{node.path}' for node '{node.name}' does not exist."
@@ -353,13 +356,11 @@ class NodeService:
             )
 
         # 4. Normalize directory paths where safely possible without requiring existence
-        import os
+        from pathtree.utils.path import normalize_path
 
         normalized_path = None
         if path is not None:
-            trimmed_path = path.strip()
-            if trimmed_path:
-                normalized_path = os.path.normpath(trimmed_path)
+            normalized_path = normalize_path(path)
 
         # 5. Check structural workspace and folder nodes must not contain a path
         if node_kind in ("workspace", "folder") and normalized_path is not None:
@@ -459,14 +460,12 @@ class NodeService:
 
         # Handle path change
         if "path" in kwargs:
-            import os
+            from pathtree.utils.path import normalize_path
 
             new_path = kwargs["path"]
             normalized_path = None
             if new_path is not None:
-                trimmed_path = new_path.strip()
-                if trimmed_path:
-                    normalized_path = os.path.normpath(trimmed_path)
+                normalized_path = normalize_path(new_path)
 
             if (
                 node.node_kind in ("workspace", "folder")

@@ -180,10 +180,16 @@ class EditNodeDialog(ModalScreen[bool]):
         if event.input.id == "input-path" and is_directory:
             path_val = event.value.strip()
             warning_area = self.query_one("#warning-area", Static)
-            if path_val and not os.path.exists(os.path.expanduser(path_val)):
-                warning_area.update(
-                    "Path does not currently exist. The entry will still be saved."
-                )
+            if path_val:
+                from pathtree.utils.path import normalize_path
+
+                normalized = normalize_path(path_val)
+                if not os.path.exists(normalized):
+                    warning_area.update(
+                        "Path does not currently exist. The entry will still be saved."
+                    )
+                else:
+                    warning_area.update("")
             else:
                 warning_area.update("")
 
@@ -216,7 +222,11 @@ class EditNodeDialog(ModalScreen[bool]):
         )
         path = None
         if is_directory:
-            path = self.query_one("#input-path", Input).value or None
+            path_val = self.query_one("#input-path", Input).value or None
+            if path_val is not None:
+                from pathtree.utils.path import normalize_path
+
+                path = normalize_path(path_val)
 
         # Determine temporary promotion
         kwargs = {
