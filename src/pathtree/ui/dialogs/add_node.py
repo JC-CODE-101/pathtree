@@ -18,6 +18,7 @@ from textual.widgets import (
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.compat import resolve_optional_uuid
 from pathtree.ui.widgets.history_input import HistoryInput
+from pathtree.ui.widgets.icon_picker import IconPicker
 from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
@@ -145,8 +146,11 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
             with Vertical(classes="field-container"):
                 yield Label("Icon", classes="field-label")
-                yield HistoryInput(
-                    placeholder="Enter icon (optional)...", id="input-icon"
+                yield IconPicker(
+                    value="",
+                    placeholder="Enter icon (optional)...",
+                    id="input-icon",
+                    node_kind="workspace",
                 )
 
             with Vertical(classes="field-container", id="parent-field-container"):
@@ -180,6 +184,15 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             self.selected_type = "folder"
         elif radio_id == "radio-directory":
             self.selected_type = "directory"
+
+        icon_picker = self.query_one(IconPicker)
+        if self.selected_type == "workspace":
+            icon_picker.set_node_type("workspace", None)
+        elif self.selected_type == "folder":
+            icon_picker.set_node_type("folder", None)
+        elif self.selected_type == "directory":
+            icon_picker.set_node_type("resource", "directory")
+
         self.update_parent_choices()
 
     def update_parent_choices(self) -> None:
@@ -279,7 +292,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
         name = self.query_one("#input-name", Input).value
         description = self.query_one("#input-description", Input).value or None
-        icon = self.query_one("#input-icon", Input).value or None
+        icon = self.query_one(IconPicker).value or None
 
         parent_val = self.query_one("#select-parent", Select).value
         parent_id = resolve_optional_uuid(parent_val)
@@ -369,6 +382,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 "input-path",
                 "input-description",
                 "input-icon",
+                "input-icon-input",
             }
             cancel_ids = {
                 "btn-cancel",

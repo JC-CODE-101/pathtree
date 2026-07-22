@@ -8,6 +8,7 @@ from textual.widgets import Button, Checkbox, Input, Label, Static
 
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.widgets.history_input import HistoryInput
+from pathtree.ui.widgets.icon_picker import IconPicker
 from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
 
@@ -135,12 +136,24 @@ class EditNodeDialog(ModalScreen[bool]):
                     id="input-description",
                 )
 
+            # Resolve current icon or default fallback if None
+            from pathtree.utils.icons import NodeIconCatalog
+
+            catalog = NodeIconCatalog()
+            current_icon = self.node.icon
+            if not current_icon:
+                current_icon = catalog.get_default_icon(
+                    self.node.node_kind, self.node.resource_type
+                )
+
             with Vertical(classes="field-container"):
                 yield Label("Icon", classes="field-label")
-                yield HistoryInput(
-                    value=self.node.icon or "",
+                yield IconPicker(
+                    value=current_icon,
                     placeholder="Enter icon...",
                     id="input-icon",
+                    node_kind=self.node.node_kind,
+                    resource_type=self.node.resource_type,
                 )
 
             with Vertical(classes="field-container"):
@@ -206,7 +219,7 @@ class EditNodeDialog(ModalScreen[bool]):
 
         name = self.query_one("#input-name", Input).value
         description = self.query_one("#input-description", Input).value or None
-        icon = self.query_one("#input-icon", Input).value or None
+        icon = self.query_one(IconPicker).value or None
 
         sort_order_str = self.query_one("#input-sort-order", Input).value
         try:
@@ -268,6 +281,7 @@ class EditNodeDialog(ModalScreen[bool]):
                 "input-path",
                 "input-description",
                 "input-icon",
+                "input-icon-input",
                 "input-sort-order",
             }
             cancel_ids = {
