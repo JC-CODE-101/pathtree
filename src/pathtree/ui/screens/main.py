@@ -6,6 +6,7 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Tree
 
@@ -14,6 +15,7 @@ from pathtree.ui.dialogs.add_node import AddNodeDialog
 from pathtree.ui.dialogs.confirm_delete import ConfirmDeleteDialog, DeleteResult
 from pathtree.ui.dialogs.edit_node import EditNodeDialog
 from pathtree.ui.dialogs.move_node import MoveNodeDialog
+from pathtree.ui.state import TreeState, TreeStateStore
 from pathtree.ui.widgets.details import NodeDetailsPanel
 from pathtree.ui.widgets.search import SearchInput
 from pathtree.ui.widgets.tree import NodeTreeView
@@ -46,17 +48,22 @@ class MainScreen(Screen[None]):
     ]
 
     def __init__(
-        self, node_service: NodeService, output_path: str | None = None
+        self,
+        node_service: NodeService,
+        output_path: str | None = None,
+        state_store: TreeStateStore | None = None,
     ) -> None:
-        """Initialize MainScreen with the node service and optional output path."""
+        """Initialize MainScreen with service, output path, and state store."""
         super().__init__(id="main-screen")
         self.node_service = node_service
         self.output_path = output_path
+        self.state_store = state_store or TreeStateStore()
         self._last_query: str = ""
         self._last_selected_node_id: uuid.UUID | None = None
         self._pre_search_selected_node_id: uuid.UUID | None = None
         self._pre_search_expanded_node_ids: set[uuid.UUID] | None = None
         self._db_is_empty: bool = False
+        self._current_tree_state: TreeState = TreeState()
 
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""
@@ -84,8 +91,47 @@ class MainScreen(Screen[None]):
 
         if tree.load_error:
             details_panel.update_error(tree.load_error)
-        else:
-            self.call_after_refresh(self._update_details_and_selection)
+            return
+
+        # Load and restore persistent UI state
+        self._current_tree_state = self.state_store.load()
+        if (
+            self._current_tree_state.expanded_node_ids
+            or self._current_tree_state.selected_node_id is not None
+        ):
+            try:
+                tree_nodes = self.node_service.get_validated_tree()
+
+                # Get existing node IDs to prevent restoring deleted/moved nodes
+                existing_ids = set()
+
+                def collect_ids(nodes):
+                    for n in nodes:
+                        existing_ids.add(n.node.id)
+                        collect_ids(n.children)
+
+                collect_ids(tree_nodes)
+
+                restored_sel_id = self._current_tree_state.selected_node_id
+                if restored_sel_id is not None and restored_sel_id not in existing_ids:
+                    restored_sel_id = None
+
+                restored_exp_ids = {
+                    eid
+                    for eid in self._current_tree_state.expanded_node_ids
+                    if eid in existing_ids
+                }
+
+                tree.load_tree(
+                    tree_nodes,
+                    selected_node_id=restored_sel_id,
+                    expanded_node_ids=restored_exp_ids,
+                )
+            except NodeServiceError as e:
+                details_panel.update_error(str(e))
+                return
+
+        self.call_after_refresh(self._update_details_and_selection)
 
     def _update_details_and_selection(self) -> None:
         """Utility to safely update details panel based on selected tree cursor."""
@@ -113,6 +159,50 @@ class MainScreen(Screen[None]):
         if tree.has_focus or self._last_selected_node_id is None:
             self._last_selected_node_id = cursor_node.data
 
+        # Keep current state available for persistence
+        self._update_persistent_state()
+
+    def on_unmount(self) -> None:
+        """Save the tree state on screen unmount/dismissal."""
+        self.save_state()
+
+    def _update_persistent_state(self) -> None:
+        """Update the state object with latest user expansion and selection."""
+        try:
+            tree = self.query_one("#tree-view", NodeTreeView)
+        except NoMatches:
+            return
+
+        if tree.load_error:
+            return
+
+        # If a search query is active, use the pre-search expansion/selection states so
+        # temporary search-expansions do not corrupt the persistent tree state.
+        if self._last_query.strip():
+            expanded_ids = self._pre_search_expanded_node_ids or set()
+            selected_id = (
+                self._pre_search_selected_node_id or self._last_selected_node_id
+            )
+        else:
+            expanded_ids = tree.get_expanded_node_ids()
+            selected_id = self._last_selected_node_id
+
+        self._current_tree_state.expanded_node_ids = set(expanded_ids)
+        self._current_tree_state.selected_node_id = selected_id
+
+    def save_state(self) -> None:
+        """Save the current tree state to the persistence store."""
+        self._update_persistent_state()
+        self.state_store.save(self._current_tree_state)
+
+    def on_tree_node_expanded(self, event: Tree.NodeExpanded[uuid.UUID]) -> None:
+        """Handle tree node expansion and update persistence state."""
+        self._update_persistent_state()
+
+    def on_tree_node_collapsed(self, event: Tree.NodeCollapsed[uuid.UUID]) -> None:
+        """Handle tree node collapsing and update persistence state."""
+        self._update_persistent_state()
+
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[uuid.UUID]) -> None:
         """Update the details panel whenever the highlighted node changes."""
         self._update_details_and_selection()
@@ -137,6 +227,7 @@ class MainScreen(Screen[None]):
 
     def action_quit(self) -> None:
         """Quit the application safely with exit code 0."""
+        self.save_state()
         self.app.exit(return_code=0)
 
     def activate_node(self, node_id: uuid.UUID) -> None:
@@ -152,6 +243,7 @@ class MainScreen(Screen[None]):
             resolved_path = self.node_service.resolve_node_path(node_id)
             with open(self.output_path, "w", encoding="utf-8") as f:
                 f.write(str(resolved_path.absolute()))
+            self.save_state()
             self.app.exit(return_code=0)
         except (NodeServiceError, OSError) as e:
             details_panel.update_error(str(e))
