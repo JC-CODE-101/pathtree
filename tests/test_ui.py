@@ -2528,6 +2528,7 @@ async def test_add_node_dialog_vim_navigation(session: Session) -> None:
         input_icon = dialog.query_one("#input-icon")
         input_icon.focus()
         await pilot.pause(0.01)
+        await pilot.press("backspace")
         await pilot.press("k")
         await pilot.pause(0.01)
         assert input_icon.value == "k"

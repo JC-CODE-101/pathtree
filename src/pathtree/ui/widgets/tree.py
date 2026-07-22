@@ -3,12 +3,34 @@
 import uuid
 from typing import ClassVar
 
+from rich.text import Text
 from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode as TextualTreeNode
 
 from pathtree.services.node_service import NodeService, NodeServiceError, TreeNode
+
+
+class IconText(Text):
+    """Custom Rich Text subclass displaying icon before name."""
+
+    def __init__(self, name: str, icon: str | None = None, *args, **kwargs) -> None:
+        """Initialize IconText with name and optional icon."""
+        self.name = name
+        self.icon = icon
+        if icon:
+            super().__init__(f"{icon} {name}", *args, **kwargs)
+        else:
+            super().__init__(name, *args, **kwargs)
+
+    def split(self, *args, **kwargs) -> list["IconText"]:
+        """Overridden to prevent split from downgrading back to standard Text."""
+        return [self]
+
+    def __str__(self) -> str:
+        """Return the clean node name without its prepended icon."""
+        return self.name
 
 
 class NodeTreeView(Tree[uuid.UUID]):
@@ -105,16 +127,28 @@ class NodeTreeView(Tree[uuid.UUID]):
             if expanded_node_ids is not None and db_node.id in expanded_node_ids:
                 should_expand = True
 
+            # Resolve icon
+            from pathtree.utils.icons import NodeIconCatalog
+
+            catalog = NodeIconCatalog()
+            icon = db_node.icon
+            if not icon:
+                icon = catalog.get_default_icon(
+                    db_node.node_kind, db_node.resource_type
+                )
+
+            label = IconText(db_node.name, icon)
+
             if children:
                 # Set expand to expand_all or if in expanded_node_ids
                 tree_node = parent_tree_node.add(
-                    db_node.name, data=db_node.id, expand=should_expand
+                    label, data=db_node.id, expand=should_expand
                 )
                 node_map[db_node.id] = tree_node
                 for child in children:
                     add_recursive(tree_node, child)
             else:
-                tree_node = parent_tree_node.add_leaf(db_node.name, data=db_node.id)
+                tree_node = parent_tree_node.add_leaf(label, data=db_node.id)
                 node_map[db_node.id] = tree_node
 
         for tree_node in tree_nodes:
