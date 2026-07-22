@@ -8,6 +8,14 @@ This document collects small UX improvements and quality-of-life ideas for PathT
 - Automatic scrolling while moving the highlighted autocomplete entry.
 - Automatic default icons based on node/resource type.
 
+## Tree Navigation
+- `W` jumps to the next Workspace.
+- `Shift+W` jumps to the previous Workspace.
+- `F` jumps to the next Folder.
+- `Shift+F` jumps to the previous Folder.
+- Consider Home/End style navigation within Folder groups or within the current Workspace.
+- Preserve the tree expansion/collapse state for the duration of a terminal session so reopening `pb` restores the previous navigation state.
+
 ## Path Handling
 - File-system browser instead of manually typing paths.
 - Better directory/file filtering depending on node type.
