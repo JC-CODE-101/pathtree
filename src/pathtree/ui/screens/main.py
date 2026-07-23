@@ -15,6 +15,7 @@ from pathtree.actions import (
     ResourceActionContext,
     ResourceActionRegistry,
 )
+from pathtree.actions.base import ResourceActionResultTarget
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.dialogs.action_menu import ActionMenuResult, ResourceActionMenu
 from pathtree.ui.dialogs.add_node import AddNodeDialog
@@ -300,7 +301,7 @@ class MainScreen(Screen[None]):
         provider,
         context: ResourceActionContext,
     ) -> None:
-        """Execute action and centrally handle results."""
+        """Execute action and centrally handle results generically."""
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
 
         # Verify disabled actions cannot execute
@@ -319,23 +320,17 @@ class MainScreen(Screen[None]):
         if result.message:
             self.app.notify(result.message)
 
-        if action_id == "change_directory":
-            if result.exit_app:
-                self.save_state()
-                self.app.exit(return_code=0)
-        elif action_id == "copy_path":
-            # Display returned path in the details panel or a temporary message
-            # and keep app open.
-            if result.output_value:
-                details_panel.update_error(f"Path: {result.output_value}")
-        elif action_id == "view_details":
-            # Display metadata in details panel & keep app open
-            if result.output_value:
+        # Render output_value according to the typed target
+        if result.target == ResourceActionResultTarget.DETAILS:
+            if result.output_value is not None:
                 details_panel.update(result.output_value)
-        else:
-            # Handle future action ids safely
-            if result.output_value:
-                details_panel.update(result.output_value)
+        elif result.target == ResourceActionResultTarget.NOTIFICATION:
+            if result.output_value is not None:
+                self.app.notify(result.output_value)
+
+        if result.exit_app:
+            self.save_state()
+            self.app.exit(return_code=0)
 
     def activate_node(self, node_id: uuid.UUID) -> None:
         """Resolve node path and handle activation."""

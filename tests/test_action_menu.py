@@ -310,6 +310,88 @@ async def test_copy_path_and_view_details_behavior(
 
 
 @pytest.mark.asyncio
+async def test_mainscreen_execute_action_generic_behavior(
+    session: Session, tmp_path: Path
+) -> None:
+    """Verify that MainScreen has no action-ID specific branching."""
+    import inspect
+
+    from pathtree.actions.base import (
+        ResourceAction,
+        ResourceActionResult,
+        ResourceActionResultTarget,
+    )
+    from pathtree.ui.screens.main import MainScreen
+
+    # 1. Assert no concrete action-ID string checks exist in MainScreen.execute_action
+    source = inspect.getsource(MainScreen.execute_action)
+    assert "change_directory" not in source
+    assert "copy_path" not in source
+    assert "view_details" not in source
+
+    # 2. Assert a future/custom action ID executes flawlessly
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="WS", node_kind="workspace"))
+    repo.create(
+        Node(
+            name="My Dir",
+            node_kind="resource",
+            resource_type="directory",
+            path=str(tmp_path),
+            parent_id=ws.id,
+        )
+    )
+
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service)
+
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        # Mock the provider to return a future action dynamically
+        provider = app.screen.action_registry.get_provider("resource", "directory")
+        original_get_actions = provider.get_available_actions
+        original_execute = provider.execute
+
+        custom_action = ResourceAction(
+            id="future_custom_act", label="Future Action", is_enabled=True
+        )
+
+        def mock_get_actions(ctx):
+            return [custom_action]
+
+        def mock_execute(action_id, ctx):
+            if action_id == "future_custom_act":
+                return ResourceActionResult(
+                    success=True,
+                    exit_app=False,
+                    output_value="Custom generic result content!",
+                    target=ResourceActionResultTarget.DETAILS,
+                )
+            return original_execute(action_id, ctx)
+
+        provider.get_available_actions = mock_get_actions
+        provider.execute = mock_execute
+
+        try:
+            await pilot.press("l")
+            await pilot.press("j")
+            await pilot.press("O")
+            await pilot.pause(0.05)
+
+            # Hit enter on our future custom action
+            await pilot.press("enter")
+            await pilot.pause(0.05)
+
+            details = app.screen.query_one("#details-panel")
+            assert "Custom generic result content!" in details.render().plain
+        finally:
+            provider.get_available_actions = original_get_actions
+            provider.execute = original_execute
+
+
+@pytest.mark.asyncio
 async def test_disabled_actions_do_not_execute() -> None:
     """Verify that disabled actions cannot be executed."""
     # Create actions list containing a disabled action

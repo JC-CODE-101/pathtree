@@ -86,6 +86,8 @@ def test_available_directory_actions_contain_stable_ids():
 
 def test_copy_path_returns_resolved_path_without_clipboard():
     """Verify copy_path returns resolved path without using clipboard."""
+    from pathtree.actions.base import ResourceActionResultTarget
+
     mock_service = MagicMock(spec=NodeService)
     # Mock node service to resolve the path
     mock_service.resolve_node_path.return_value = Path("/absolute/resolved/path")
@@ -104,12 +106,15 @@ def test_copy_path_returns_resolved_path_without_clipboard():
     result = provider.execute("copy_path", context)
     assert result.success is True
     assert result.exit_app is False
-    assert result.output_value == "/absolute/resolved/path"
+    assert result.output_value == "Path: /absolute/resolved/path"
     assert "Copied path" in result.message
+    assert result.target == ResourceActionResultTarget.DETAILS
 
 
 def test_view_details_returns_structured_metadata():
     """Verify view_details action returns formatted metadata."""
+    from pathtree.actions.base import ResourceActionResultTarget
+
     mock_service = MagicMock(spec=NodeService)
     mock_service.resolve_node_path.return_value = Path("/resolved/path")
 
@@ -131,6 +136,7 @@ def test_view_details_returns_structured_metadata():
     assert "/resolved/path" in result.output_value
     assert "testdir" in result.output_value
     assert "A test directory description" in result.output_value
+    assert result.target == ResourceActionResultTarget.DETAILS
 
 
 def test_invalid_node_kind_rejected_by_provider():
