@@ -51,6 +51,147 @@ This document collects small UX improvements and quality-of-life ideas for PathT
 - Keep the implementation provider-driven through the existing Resource Action Framework.
 - Do not add resource-specific branching to `MainScreen`.
 
+## Node Variables for Script Arguments
+
+Allow users to mark existing path-based nodes as reusable PathTree variables.
+
+### Variable binding
+
+- A Directory, File, Script or other path-based resource may be marked as a variable.
+- The variable should reference the node by its stable node ID instead of copying the current path as plain text.
+- When the node path changes, all references resolve to the updated path automatically.
+- Variable names should be user-defined and descriptive, for example:
+  - `input_dir`
+  - `output_dir`
+  - `project_root`
+  - `config_file`
+  - `export_script`
+- PathTree may suggest a variable name based on the node name.
+- Variable names must be unique within their scope.
+
+### Scopes
+
+Support scoped variables, for example:
+
+- Global
+- Workspace
+- Script Profile
+
+Resolution order may be:
+
+1. Script Profile
+2. Workspace
+3. Global
+
+### Tree actions
+
+Add context-sensitive actions for compatible nodes:
+
+- Mark as Variable
+- Edit Variable Name
+- Remove Variable Binding
+- Copy Variable Reference
+
+Display the active variable binding in the node details panel.
+
+Example:
+
+```text
+Variable: {{ input_dir }}
+Scope: Workspace
+```
+
+### Script argument integration
+
+Once variables are defined, they should appear as selectable entries inside the Script argument editor.
+
+Example argument editor:
+
+```text
+Argument Type:
+- Text
+- Variable
+
+Value:
+[ input_dir ▼ ]
+```
+
+The variable selector should:
+
+- list available variables by scope;
+- group variables by node/resource type;
+- display the current resolved path;
+- support search;
+- prevent manual typing errors;
+- store the node-backed variable reference rather than a copied path.
+
+Example:
+
+```text
+Workspace Variables
+
+input_dir
+/home/jc/videos/input
+
+output_dir
+/home/jc/videos/output
+```
+
+Internally, the argument may be represented as:
+
+```text
+{{ input_dir }}
+```
+
+Before execution, PathTree resolves the current node value and inserts it as one argv element.
+
+Example profile:
+
+```text
+--input
+{{ input_dir }}
+
+--output
+{{ output_dir }}/result.mov
+```
+
+Resolved argv:
+
+```python
+[
+    "python3",
+    "convert.py",
+    "--input",
+    "/home/jc/videos/input",
+    "--output",
+    "/home/jc/videos/output/result.mov",
+]
+```
+
+### Security
+
+- Variable resolution must never invoke shell expansion.
+- Values must be inserted into explicit argv elements.
+- Do not use `shell=True`.
+- Do not evaluate `$VAR`, `%VAR%`, command substitution or arbitrary expressions.
+- Use a PathTree-specific placeholder format such as `{{ variable_name }}`.
+- Missing, duplicate or broken variable references must produce clear validation errors.
+
+### Future direction
+
+This system may later support:
+
+- named Script run profiles;
+- file and directory picker variables;
+- typed variables;
+- runtime input forms;
+- environment variables;
+- workspace templates;
+- reusable workflows;
+- a visual workflow editor.
+
+A custom scripting or workflow language should remain a later possibility and should not be required for the initial variable system.
+
 ## Context-sensitive Status Bar
 - Show only shortcuts valid for the currently selected node and active UI mode.
 - Display different shortcuts for Workspace, Folder and Resource nodes.
