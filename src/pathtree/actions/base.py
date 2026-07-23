@@ -1,9 +1,18 @@
 """Base models, protocols, and context for the PathTree action framework."""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
 from pathtree.models.node import Node
+
+
+class ResourceActionResultTarget(StrEnum):
+    """Specifies where the action execution result should be presented in the UI."""
+
+    NONE = "none"
+    DETAILS = "details"
+    NOTIFICATION = "notification"
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,7 @@ class ResourceActionResult:
     output_value: str | None = None
     message: str | None = None
     error_message: str | None = None
+    target: ResourceActionResultTarget = ResourceActionResultTarget.NONE
 
 
 @runtime_checkable

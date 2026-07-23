@@ -5,6 +5,7 @@ from pathtree.actions.base import (
     ResourceActionContext,
     ResourceActionProvider,
     ResourceActionResult,
+    ResourceActionResultTarget,
 )
 from pathtree.services.node_service import NodeService, NodeServiceError
 
@@ -95,6 +96,7 @@ class DirectoryActionProvider(ResourceActionProvider):
                     exit_app=True,
                     output_value=resolved_path,
                     message=f"Successfully changed directory to {resolved_path}",
+                    target=ResourceActionResultTarget.NONE,
                 )
             except (OSError, UnicodeError) as e:
                 return ResourceActionResult(
@@ -108,8 +110,9 @@ class DirectoryActionProvider(ResourceActionProvider):
             return ResourceActionResult(
                 success=True,
                 exit_app=False,
-                output_value=resolved_path,
+                output_value=f"Path: {resolved_path}",
                 message=f"Copied path: {resolved_path}",
+                target=ResourceActionResultTarget.DETAILS,
             )
 
         elif action_id == "view_details":
@@ -123,6 +126,7 @@ class DirectoryActionProvider(ResourceActionProvider):
                 exit_app=False,
                 output_value=metadata,
                 message=f"Details for {context.node.name}",
+                target=ResourceActionResultTarget.DETAILS,
             )
 
         else:
