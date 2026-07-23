@@ -174,20 +174,27 @@ class PlatformLauncher:
             if shutil.which("wt"):
                 term_argv = ["wt", "new-tab", sys.executable, str(temp_path)]
             else:
-                term_argv = ["cmd.exe", "/c", "start", sys.executable, str(temp_path)]
+                term_argv = [sys.executable, str(temp_path)]
         else:
             # Linux and other Unix-like OSes
             env_terminal = os.environ.get("TERMINAL")
-            resolved_term = None
+            resolved_term_argv = None
             if env_terminal:
+                unsafe_operators = [";", "&&", "||", "|", ">", "<", "$(", "`"]
+                if any(op in env_terminal for op in unsafe_operators):
+                    return ProcessLaunchResult(
+                        success=False,
+                        error_message="Unsafe shell syntax detected in $TERMINAL.",
+                    )
+
                 import shlex
 
                 tokens = shlex.split(env_terminal)
                 resolved_path = shutil.which(tokens[0]) if tokens else None
                 if resolved_path:
-                    resolved_term = resolved_path
+                    resolved_term_argv = [resolved_path, *tokens[1:]]
 
-            if not resolved_term:
+            if not resolved_term_argv:
                 for term in [
                     "x-terminal-emulator",
                     "kitty",
@@ -200,10 +207,10 @@ class PlatformLauncher:
                 ]:
                     resolved_path = shutil.which(term)
                     if resolved_path:
-                        resolved_term = resolved_path
+                        resolved_term_argv = [resolved_path]
                         break
 
-            if not resolved_term:
+            if not resolved_term_argv:
                 return ProcessLaunchResult(
                     success=False,
                     error_message=(
@@ -213,33 +220,38 @@ class PlatformLauncher:
                     ),
                 )
 
-            base = os.path.basename(resolved_term)
+            base = os.path.basename(resolved_term_argv[0])
             if base == "gnome-terminal":
-                term_argv = [resolved_term, "--", sys.executable, str(temp_path)]
+                term_argv = [*resolved_term_argv, "--", sys.executable, str(temp_path)]
             elif base == "konsole":
-                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+                term_argv = [*resolved_term_argv, "-e", sys.executable, str(temp_path)]
             elif base == "xfce4-terminal":
-                term_argv = [resolved_term, "-x", sys.executable, str(temp_path)]
+                term_argv = [*resolved_term_argv, "-x", sys.executable, str(temp_path)]
             elif base == "kitty":
-                term_argv = [resolved_term, "--", sys.executable, str(temp_path)]
+                term_argv = [*resolved_term_argv, "--", sys.executable, str(temp_path)]
             elif base == "alacritty":
-                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+                term_argv = [*resolved_term_argv, "-e", sys.executable, str(temp_path)]
             elif base == "wezterm":
                 term_argv = [
-                    resolved_term,
+                    *resolved_term_argv,
                     "start",
                     "--",
                     sys.executable,
                     str(temp_path),
                 ]
             elif base == "xterm":
-                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+                term_argv = [*resolved_term_argv, "-e", sys.executable, str(temp_path)]
             else:
-                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+                term_argv = [*resolved_term_argv, "-e", sys.executable, str(temp_path)]
 
-        # Launch the resolved terminal emulator in background
+        # Launch resolved emulator (using CREATE_NEW_CONSOLE on Windows)
+        extra_kwargs = {}
+        if sys.platform == "win32" and "wt" not in term_argv[0]:
+            # CREATE_NEW_CONSOLE is 0x00000010
+            extra_kwargs["creationflags"] = 0x00000010
+
         try:
-            proc = subprocess.Popen(term_argv)
+            proc = subprocess.Popen(term_argv, **extra_kwargs)
             return ProcessLaunchResult(success=True, pid=proc.pid)
         except OSError as e:
             return ProcessLaunchResult(

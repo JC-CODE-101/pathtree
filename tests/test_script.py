@@ -1,4 +1,5 @@
 import os
+import sys
 import uuid
 from unittest.mock import MagicMock, patch
 
@@ -411,6 +412,81 @@ def test_unsupported_terminal_returns_error(mock_which, tmp_path):
         res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
         assert res.success is False
         assert "No supported terminal emulator found" in res.error_message
+
+
+def test_unsafe_terminal_syntax_rejection(tmp_path):
+    """Verify that unsafe $TERMINAL configurations are rejected safely."""
+    for unsafe in [
+        "kitty; rm -rf /",
+        "kitty && touch exploit",
+        "kitty || echo 1",
+        "kitty | bash",
+        "kitty > output",
+        "kitty < input",
+        "kitty $(whoami)",
+        "kitty `whoami`",
+    ]:
+        with patch.dict(os.environ, {"TERMINAL": unsafe}, clear=True):
+            res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
+            assert res.success is False
+            assert "Unsafe shell syntax" in res.error_message
+
+
+@patch("shutil.which")
+def test_terminal_fixed_args_preservation(mock_which, tmp_path):
+    """Verify that safe fixed arguments in $TERMINAL are fully preserved."""
+    mock_which.side_effect = lambda cmd: "/usr/bin/kitty" if cmd == "kitty" else None
+
+    with (
+        patch.dict(os.environ, {"TERMINAL": "kitty --single-instance"}, clear=True),
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
+        assert res.success is True
+        mock_popen.assert_called_once()
+        args, _ = mock_popen.call_args
+        # First tokens should be resolved kitty plus --single-instance
+        assert args[0][:2] == ["/usr/bin/kitty", "--single-instance"]
+
+
+@patch("sys.platform", "win32")
+@patch("shutil.which")
+def test_windows_terminal_uses_explicit_argv(mock_which, tmp_path):
+    """Verify Windows Terminal (wt) uses a safe explicit argv list."""
+    mock_which.side_effect = lambda cmd: (
+        "C:\\Windows\\System32\\wt.exe" if "wt" in cmd else None
+    )
+
+    with patch("subprocess.Popen") as mock_popen:
+        res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
+        assert res.success is True
+        mock_popen.assert_called_once()
+        args, kwargs = mock_popen.call_args
+        assert args[0][0] == "wt"
+        assert args[0][1] == "new-tab"
+        assert "creationflags" not in kwargs
+
+
+@patch("sys.platform", "win32")
+@patch("shutil.which")
+def test_windows_direct_launch_console_without_cmd(mock_which, tmp_path):
+    """Verify Windows direct console launch uses CREATE_NEW_CONSOLE without cmd.exe."""
+    mock_which.return_value = None  # No wt.exe available
+
+    with patch("subprocess.Popen") as mock_popen:
+        res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
+        assert res.success is True
+        mock_popen.assert_called_once()
+        args, kwargs = mock_popen.call_args
+
+        # Verify no cmd.exe /c start or shell string is used
+        assert "cmd.exe" not in args[0]
+        assert "powershell" not in args[0]
+        # Should directly launch Python
+        assert args[0][0] == sys.executable
+
+        # Verify CREATE_NEW_CONSOLE creation flag (0x10) is supplied
+        assert kwargs.get("creationflags") == 0x00000010
 
 
 @patch("subprocess.Popen")
