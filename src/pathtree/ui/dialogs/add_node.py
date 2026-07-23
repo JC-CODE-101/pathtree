@@ -150,6 +150,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     yield RadioButton("Folder", id="radio-folder")
                     yield RadioButton("Directory", id="radio-directory")
                     yield RadioButton("File", id="radio-file")
+                    yield RadioButton("Script", id="radio-script")
 
             with Vertical(classes="field-container"):
                 yield Label("Name *", classes="field-label")
@@ -210,6 +211,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             self.selected_type = "directory"
         elif radio_id == "radio-file":
             self.selected_type = "file"
+        elif radio_id == "radio-script":
+            self.selected_type = "script"
 
         icon_picker = self.query_one(IconPicker)
         if self.selected_type == "workspace":
@@ -220,11 +223,13 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             icon_picker.set_node_type("resource", "directory")
         elif self.selected_type == "file":
             icon_picker.set_node_type("resource", "file")
+        elif self.selected_type == "script":
+            icon_picker.set_node_type("resource", "script")
 
         # Update path autocomplete mode based on selection immediately
         try:
             path_autocomplete = self.query_one("#input-path-wrapper", PathAutocomplete)
-            if self.selected_type == "file":
+            if self.selected_type in ("file", "script"):
                 path_autocomplete.set_mode(PathAutocompleteMode.FILE)
             else:
                 path_autocomplete.set_mode(PathAutocompleteMode.DIRECTORY)
@@ -252,9 +257,9 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             create_btn.disabled = False
             return
 
-        # Folder, Directory or File:
-        path_container.display = self.selected_type in ("directory", "file")
-        temp_checkbox.display = self.selected_type in ("directory", "file")
+        # Folder, Directory, File or Script:
+        path_container.display = self.selected_type in ("directory", "file", "script")
+        temp_checkbox.display = self.selected_type in ("directory", "file", "script")
         parent_container.display = True
         select_parent.disabled = False
 
@@ -301,10 +306,11 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             select_parent.value = valid_choices[0][1]
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        # We handle real-time path validation warning for Directory or File path
+        # We handle real-time path validation warning for Directory, File or Script path
         if event.input.id == "input-path" and self.selected_type in (
             "directory",
             "file",
+            "script",
         ):
             path_val = event.value.strip()
             warning_area = self.query_one("#warning-area", Static)
@@ -354,12 +360,12 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             resource_type = None
             path = None
             is_temporary = False
-        else:  # directory or file
+        else:  # directory, file, or script
             if parent_id is None:
                 status_area.update("A valid parent Workspace or Folder is required.")
                 return
             node_kind = "resource"
-            resource_type = self.selected_type  # "directory" or "file"
+            resource_type = self.selected_type  # "directory", "file", or "script"
             path_val = self.query_one("#input-path", Input).value or None
             path = None
             if path_val is not None:

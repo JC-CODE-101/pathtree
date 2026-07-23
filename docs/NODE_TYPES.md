@@ -117,6 +117,43 @@ The default Unicode symbol for File resources is `▤` (Document), with customiz
 
 ---
 
+# Script
+
+Purpose
+
+Represents an executable script file.
+
+Examples
+
+run.py
+
+deploy.sh
+
+build.js
+
+Semantics
+
+A Script resource represents a concrete script or executable on the local filesystem. Unlike workspaces or folders, Script resources are terminal/leaf nodes and cannot have any child nodes.
+
+Hierarchy Rules
+
+- Script resources may be children of:
+  - Workspace
+  - Folder
+- Script resources may **not** be parent nodes to any other node.
+- A Script resource must have a non-empty path, which is strictly validated during node creation and update. This path must:
+  - resolve to an existing filesystem entry;
+  - resolve to a regular file (directories are rejected);
+  - resolve relative paths consistently through the service layer.
+
+Note on Permissions: The script file does not require its executable bit to be set, because scripts such as Python files may be launched through an interpreter.
+
+Icon & Customization
+
+The default Unicode symbol for Script resources is `⚡` (Lightning), with customization options like `⌁` (Electric), `⚙` (Gear), or `⌬` (Hexagon) selectable via the Icon Picker dialog.
+
+---
+
 # Documentation
 
 Purpose
