@@ -96,6 +96,25 @@ notes.txt
 
 scene.blend
 
+Semantics
+
+A File resource represents a concrete regular file on the local filesystem. Unlike workspaces or folders, File resources are terminal/leaf nodes and cannot have any child nodes.
+
+Hierarchy Rules
+
+- File resources may be children of:
+  - Workspace
+  - Folder
+- File resources may **not** be parent nodes to any other node.
+- A File resource must have a non-empty path, which is strictly validated during node creation and update. This path must:
+  - resolve to an existing filesystem entry;
+  - resolve to a regular file (directories are rejected);
+  - resolve relative paths consistently through the service layer.
+
+Icon & Customization
+
+The default Unicode symbol for File resources is `▤` (Document), with customization options like `📄` (Page) or `🗎` (File Icon) selectable via the Icon Picker dialog.
+
 ---
 
 # Documentation

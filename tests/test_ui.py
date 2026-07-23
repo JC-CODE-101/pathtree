@@ -2471,12 +2471,22 @@ async def test_add_node_dialog_vim_navigation(session: Session) -> None:
         await pilot.pause(0.01)
         assert dialog.selected_type == "directory"
 
-        # Test wrapping with 'j' moves Directory -> Workspace
+        # Test 'j' moves Directory -> File
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "file"
+
+        # Test wrapping with 'j' moves File -> Workspace
         await pilot.press("j")
         await pilot.pause(0.01)
         assert dialog.selected_type == "workspace"
 
-        # Test 'k' moves Workspace -> Directory (wrapping)
+        # Test 'k' moves Workspace -> File (wrapping)
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "file"
+
+        # Test 'k' moves File -> Directory
         await pilot.press("k")
         await pilot.pause(0.01)
         assert dialog.selected_type == "directory"

@@ -7,10 +7,12 @@ from pathtree.actions.base import (
     ResourceActionResult,
 )
 from pathtree.actions.directory import DirectoryActionProvider
+from pathtree.actions.file import FileActionProvider
 from pathtree.actions.registry import ResourceActionRegistry
 
 __all__ = [
     "DirectoryActionProvider",
+    "FileActionProvider",
     "ResourceAction",
     "ResourceActionContext",
     "ResourceActionProvider",

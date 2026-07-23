@@ -72,10 +72,15 @@ class MainScreen(Screen[None]):
         self._db_is_empty: bool = False
         self._current_tree_state: TreeState = TreeState()
 
-        # Initialize Action Registry and Register Directory Provider
+        # Initialize Action Registry and Register Providers
         self.action_registry = ResourceActionRegistry()
         self.action_registry.register(
             "resource", "directory", DirectoryActionProvider(self.node_service)
+        )
+        from pathtree.actions.file import FileActionProvider
+
+        self.action_registry.register(
+            "resource", "file", FileActionProvider(self.node_service)
         )
 
     def compose(self) -> ComposeResult:

@@ -221,11 +221,37 @@ This section describes the initial implementation of the resource-specific actio
   - `error_message`: Error information if `success` is false.
 - Validation failures and expected unsupported actions must not raise exceptions; they are returned safely as unsuccessful `ResourceActionResult` objects.
 
+## Concrete Resource Types: File Resource Support
+
+PathTree supports full-featured File resources with secure launching capabilities.
+
+### Available Actions
+1. **`open_file` (Default)**
+   - Opens the file with the platform default application.
+   - On Linux, this delegates to `xdg-open`. On macOS, to `open`. On Windows, to `os.startfile`.
+   - Returns a notification target action result to keep the TUI open.
+
+2. **`edit_file`**
+   - Launches a configured text editor.
+   - Leverages standard `EDITOR` or `VISUAL` environment variables (e.g., `export EDITOR='nano'`).
+   - If no editor is configured, returns a clear, non-fatal error result to prevent crashing the TUI.
+
+3. **`copy_path`**
+   - Returns the absolute file path and presents it in the details panel using `ResourceActionResultTarget.DETAILS`.
+
+4. **`view_details`**
+   - Returns structured metadata about the file including Name, Path, File Size, Suffix/Extension, and Description if present, presented in the details panel using `ResourceActionResultTarget.DETAILS`.
+
+### Security Requirements and Launcher Architecture
+- **Prohibition of `shell=True`**: All subprocess operations strictly avoid `shell=True` to prevent shell injection vulnerabilities.
+- **Explicit Argument Sequences**: Command and arguments are parsed using `shlex.split` and passed directly as list sequences (`argv: list[str]`).
+- **No Implicit Execution**: Opening or selecting a File resource will never execute the file itself. It is only opened via standard default application launchers.
+- **NUL Byte Rejections**: Paths and executable arguments containing NUL bytes (`\x00`) are rejected proactively to avoid subprocess vulnerability/hijacking.
+
 ## Future Resource Types
 - The architecture is designed to accommodate additional resource types such as:
   - `script` / `run`
   - `url` / `open_url`
-  - `file` / `edit` / `view`
   - `executable` / `run`
   - `ssh` / `command`
 
