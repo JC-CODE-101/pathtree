@@ -4,6 +4,7 @@ import uuid
 from typing import ClassVar
 
 from rich.text import Text
+from textual import events
 from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import Tree
@@ -354,3 +355,29 @@ class NodeTreeView(Tree[uuid.UUID]):
             return
         if not node.is_expanded and node.allow_expand:
             node.expand()
+
+    async def _on_click(self, event: events.Click) -> None:
+        """Custom mouse click and double-click handling.
+
+        Single left click selects the node and updates details but never
+        executes actions.
+        Double left click executes the default action on executable resource nodes.
+        Workspace and Folder nodes are not treated as executable resources.
+        """
+        async with self.lock:
+            meta = event.style.meta
+            if "line" in meta:
+                cursor_line = meta["line"]
+                if meta.get("toggle", False):
+                    node = self.get_node_at_line(cursor_line)
+                    if node is not None:
+                        self._toggle_node(node)
+                else:
+                    self.cursor_line = cursor_line
+
+                    if event.chain >= 2:
+                        node = self.get_node_at_line(cursor_line)
+                        if node is not None and node.data is not None:
+                            db_node = self.node_service.get_node(node.data)
+                            if db_node is not None and db_node.node_kind == "resource":
+                                self.post_message(Tree.NodeSelected(node))
