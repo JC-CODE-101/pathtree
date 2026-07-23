@@ -1,6 +1,7 @@
 """Reusable PathAutocomplete widget for Directory path inputs."""
 
 import os
+from enum import StrEnum
 from typing import ClassVar
 
 from textual import events
@@ -53,6 +54,13 @@ class PathAutocompleteOptionList(OptionList):
             self.parent_widget.on_blur(event)
 
 
+class PathAutocompleteMode(StrEnum):
+    """Modes supported by PathAutocomplete."""
+
+    DIRECTORY = "directory"
+    FILE = "file"
+
+
 class PathAutocomplete(Widget):
     """A reusable path autocomplete widget with directory suggestions."""
 
@@ -85,6 +93,7 @@ class PathAutocomplete(Widget):
         value: str = "",
         placeholder: str = "",
         id: str | None = None,
+        mode: PathAutocompleteMode | str = PathAutocompleteMode.DIRECTORY,
         **kwargs,
     ) -> None:
         """Initialize PathAutocomplete with wrapped Input configurations."""
@@ -94,11 +103,25 @@ class PathAutocomplete(Widget):
         self.initial_value = value
         self.placeholder = placeholder
         self.input_id = id or "input-path"
+        self._mode = PathAutocompleteMode(mode)
         self.is_suggestions_visible = False
         self._is_accepting_suggestion = False
         self.option_list = PathAutocompleteOptionList(
             classes="path-suggestions-list", parent_widget=self
         )
+
+    def set_mode(self, mode: PathAutocompleteMode | str) -> None:
+        """Set the autocomplete mode (directory or file) and update suggestions."""
+        new_mode = PathAutocompleteMode(mode)
+        if self._mode != new_mode:
+            self._mode = new_mode
+            try:
+                input_widget = self.query_one(f"#{self.input_id}", Input)
+                val = input_widget.value
+                if self.is_suggestions_visible or (val and input_widget.has_focus):
+                    self.update_suggestions(val)
+            except NoMatches:
+                pass
 
     def compose(self) -> ComposeResult:
         """Compose the wrapped Input and suggestions OptionList."""
@@ -371,8 +394,9 @@ class PathAutocomplete(Widget):
             self.show_suggestions()
             return
 
-        # 2. Scan parent directory (non-recursive, directories only)
-        entries = []
+        # 2. Scan parent directory (directories only, plus files if FILE mode)
+        dir_entries = []
+        file_entries = []
         try:
             with os.scandir(scandir_path) as it:
                 while True:
@@ -386,7 +410,12 @@ class PathAutocomplete(Widget):
                                 real_cand = os.path.realpath(cand_path)
                                 # Cycle check: exclude if resolves to ancestor chain
                                 if real_cand not in ancestors:
-                                    entries.append(entry.name + "/")
+                                    dir_entries.append(entry.name + "/")
+                            elif (
+                                self._mode == PathAutocompleteMode.FILE
+                                and entry.is_file(follow_symlinks=True)
+                            ):
+                                file_entries.append(entry.name)
                         except OSError:
                             # Safely ignore a single broken entry
                             pass
@@ -406,8 +435,9 @@ class PathAutocomplete(Widget):
             self.show_suggestions()
             return
 
-        # Sort names alphabetically
-        entries.sort()
+        # Sort names alphabetically within each group
+        dir_entries.sort()
+        file_entries.sort()
 
         # 3. Add special dot/dot-dot directories matching the prefix
         special_dirs = []
@@ -416,13 +446,28 @@ class PathAutocomplete(Widget):
         elif typed_prefix == "..":
             special_dirs = ["../"]
 
-        # Filter standard directories by prefix
-        matches = [name for name in entries if name.startswith(typed_prefix)]
+        # Filter standard directories and files by prefix
+        dir_matches = [name for name in dir_entries if name.startswith(typed_prefix)]
+        file_matches = [name for name in file_entries if name.startswith(typed_prefix)]
 
         # Combine, preserving uniqueness and order
         all_matches = []
         seen = set()
-        for name in special_dirs + matches:
+
+        # Add special dirs
+        for name in special_dirs:
+            if name not in seen:
+                seen.add(name)
+                all_matches.append(name)
+
+        # Add directory matches next
+        for name in dir_matches:
+            if name not in seen:
+                seen.add(name)
+                all_matches.append(name)
+
+        # Add file matches last
+        for name in file_matches:
             if name not in seen:
                 seen.add(name)
                 all_matches.append(name)
@@ -430,9 +475,11 @@ class PathAutocomplete(Widget):
         # 4. Display options
         self.option_list.clear_options()
         if not all_matches:
-            self.option_list.add_option(
-                Option("No matching directories.", disabled=True)
-            )
+            if self._mode == PathAutocompleteMode.FILE:
+                msg = "No matching files or directories."
+            else:
+                msg = "No matching directories."
+            self.option_list.add_option(Option(msg, disabled=True))
             self.show_suggestions()
             return
 

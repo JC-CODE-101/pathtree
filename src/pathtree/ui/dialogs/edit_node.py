@@ -9,7 +9,7 @@ from textual.widgets import Button, Checkbox, Input, Label, Static
 from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.widgets.history_input import HistoryInput
 from pathtree.ui.widgets.icon_picker import IconPicker
-from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
+from pathtree.ui.widgets.path_autocomplete import PathAutocomplete, PathAutocompleteMode
 
 
 class EditNodeDialog(ModalScreen[bool]):
@@ -142,10 +142,17 @@ class EditNodeDialog(ModalScreen[bool]):
             )
             with Vertical(classes="field-container", id="path-field-container") as vc:
                 yield Label("Path", classes="field-label")
+                initial_mode = (
+                    PathAutocompleteMode.FILE
+                    if self.node.node_kind == "resource"
+                    and self.node.resource_type == "file"
+                    else PathAutocompleteMode.DIRECTORY
+                )
                 yield PathAutocomplete(
                     value=self.node.path or "",
                     placeholder="Enter path...",
                     id="input-path",
+                    mode=initial_mode,
                 )
                 if not is_resource_with_path:
                     vc.display = False
