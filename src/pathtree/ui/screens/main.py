@@ -82,6 +82,11 @@ class MainScreen(Screen[None]):
         self.action_registry.register(
             "resource", "file", FileActionProvider(self.node_service)
         )
+        from pathtree.actions.script import ScriptActionProvider
+
+        self.action_registry.register(
+            "resource", "script", ScriptActionProvider(self.node_service)
+        )
 
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""

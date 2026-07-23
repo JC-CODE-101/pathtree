@@ -248,9 +248,61 @@ PathTree supports full-featured File resources with secure launching capabilitie
 - **No Implicit Execution**: Opening or selecting a File resource will never execute the file itself. It is only opened via standard default application launchers.
 - **NUL Byte Rejections**: Paths and executable arguments containing NUL bytes (`\x00`) are rejected proactively to avoid subprocess vulnerability/hijacking.
 
+## Concrete Resource Types: Script Resource Support
+
+PathTree supports full-featured, secure Script resource execution.
+
+### Available Actions
+1. **`run_script` (Default)**
+   - Executes the selected script safely.
+   - Leverages a secure subprocess runner.
+   - Runs using the parent directory of the script file as its process working directory (`cwd = script_path.parent`). This behavior is documented as part of the current MVP.
+
+2. **`edit_script`**
+   - Opens the script file in your configured text editor.
+   - Reuses standard `EDITOR` or `VISUAL` editor parsing and launching logic safely.
+
+3. **`copy_path`**
+   - Copies script path to details panel.
+
+4. **`view_details`**
+   - Shows script metadata, including detected interpreter, working directory, whether path exists, and whether file is executable, without executing the script.
+
+### Interpreter Resolution Order
+The runner is resolved in this order:
+1. **Valid shebang**: Parsed securely from the first line (e.g. `#!/usr/bin/python3` or `#!/usr/bin/env python3`).
+2. **Known file extension**: Default interpreter mapped to extension:
+   - `.py` -> `python3` (or `python` fallback)
+   - `.sh`, `.bash` -> `bash`
+   - `.zsh` -> `zsh`
+   - `.js`, `.mjs` -> `node`
+   - `.ts` -> TypeScript runners (`ts-node`, `bun`, `deno` if installed)
+   - `.lua` -> `lua`
+   - `.rb` -> `ruby`
+   - `.pl` -> `perl`
+   - `.ps1` -> `pwsh`
+3. **Direct execution**: Supported if the file itself has its executable bit set (`X_OK`).
+4. **Unsupported error**: Returns a clear non-fatal error to prevent TUI crashes.
+
+Before launching, interpreters are verified using `shutil.which()`. If unavailable, a clear error is returned to the user safely.
+
+### Security Guarantees
+- **No `shell=True` or Shell Wrappers**: Never uses `shell=True`, `sh -c`, `bash -c`, `cmd /c`, or string command lines.
+- **Explicit Argument List**: Construct commands using parsed, sequential token arrays (`argv`).
+- **No Arbitrary Shell Syntax**: Does not execute arbitrary shell syntax after a shebang.
+
+### MVP Limitations & Deferred Features
+The following features are intentionally deferred from this MVP:
+- Custom interpreter profiles
+- Persisted command-line arguments
+- Custom environment variables
+- Configurable working directories
+- Output capturing and logging
+- Terminal-attached execution (interactive prompts)
+- Long-running process management (stop/restart controls)
+
 ## Future Resource Types
 - The architecture is designed to accommodate additional resource types such as:
-  - `script` / `run`
   - `url` / `open_url`
   - `executable` / `run`
   - `ssh` / `command`

@@ -4,11 +4,21 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
 class LaunchError(Exception):
     """Exception raised for launcher validation/execution failures."""
+
+
+@dataclass(frozen=True)
+class ProcessLaunchResult:
+    """The result of launching a process securely."""
+
+    success: bool
+    pid: int | None = None
+    error_message: str | None = None
 
 
 class PlatformLauncher:
@@ -84,3 +94,33 @@ class PlatformLauncher:
             subprocess.Popen(argv)
         except (OSError, ValueError) as e:
             raise LaunchError(f"Failed to launch editor: {e}") from e
+
+    @classmethod
+    def launch_process(
+        cls, argv: list[str], cwd: Path | None = None
+    ) -> ProcessLaunchResult:
+        """Launch an external process securely without blocking the TUI."""
+        if not argv:
+            return ProcessLaunchResult(
+                success=False, error_message="No execution arguments provided."
+            )
+
+        try:
+            executable = argv[0]
+            cls.validate_path(executable)
+            for arg in argv[1:]:
+                cls.validate_path(arg)
+
+            if not shutil.which(executable):
+                return ProcessLaunchResult(
+                    success=False,
+                    error_message=f"Executable '{executable}' not found in PATH.",
+                )
+
+            # Use subprocess.Popen with explicit argv, shell=False is default
+            proc = subprocess.Popen(argv, cwd=cwd)
+            return ProcessLaunchResult(success=True, pid=proc.pid)
+        except (OSError, ValueError, LaunchError) as e:
+            return ProcessLaunchResult(
+                success=False, error_message=f"Failed to launch process: {e!s}"
+            )

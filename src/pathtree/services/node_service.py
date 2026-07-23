@@ -274,7 +274,7 @@ class NodeService:
                         f"Path '{node.path}' for node '{node.name}' "
                         "exists but is not a directory."
                     )
-            elif node.resource_type == "file":
+            elif node.resource_type in ("file", "script"):
                 if not path.is_file():
                     raise PathNotAFileError(
                         f"Path '{node.path}' for node '{node.name}' "
@@ -311,6 +311,7 @@ class NodeService:
         - node_kind = "folder" and resource_type = None
         - node_kind = "resource" and resource_type = "directory"
         - node_kind = "resource" and resource_type = "file"
+        - node_kind = "resource" and resource_type = "script"
 
         Raises:
             ValidationError: If any other combination is provided.
@@ -326,6 +327,8 @@ class NodeService:
         elif kind == "resource" and res_type == "directory":
             valid = True
         elif kind == "resource" and res_type == "file":
+            valid = True
+        elif kind == "resource" and res_type == "script":
             valid = True
 
         if not valid:
@@ -382,18 +385,22 @@ class NodeService:
         if node_kind in ("workspace", "folder") and normalized_path is not None:
             raise ValidationError("Structural nodes must not contain a path.")
 
-        # 5b. Check that a File resource has a valid existing file path
-        if node_kind == "resource" and resource_type == "file":
+        # 5b. Check that a File or Script resource has a valid existing file path
+        if node_kind == "resource" and resource_type in ("file", "script"):
             if not normalized_path:
-                raise ValidationError("File path cannot be empty.")
+                raise ValidationError(
+                    f"{resource_type.capitalize()} path cannot be empty."
+                )
             path_obj = Path(normalized_path)
             if not path_obj.exists():
                 raise PathNotFoundError(
-                    f"File path '{normalized_path}' does not exist."
+                    f"{resource_type.capitalize()} path "
+                    f"'{normalized_path}' does not exist."
                 )
             if not path_obj.is_file():
                 raise PathNotAFileError(
-                    f"File path '{normalized_path}' is not a regular file."
+                    f"{resource_type.capitalize()} path "
+                    f"'{normalized_path}' is not a regular file."
                 )
 
         # 6. Assign resource_type="directory" explicitly for directory resources
@@ -514,19 +521,23 @@ class NodeService:
         if "is_favorite" in kwargs:
             proposed_is_favorite = kwargs["is_favorite"]
 
-        # If node is a file resource, validate proposed path
-        if node.node_kind == "resource" and node.resource_type == "file":
+        # If node is a file or script resource, validate proposed path
+        if node.node_kind == "resource" and node.resource_type in ("file", "script"):
             path_to_validate = proposed_path
             if not path_to_validate:
-                raise ValidationError("File path cannot be empty.")
+                raise ValidationError(
+                    f"{node.resource_type.capitalize()} path cannot be empty."
+                )
             path_obj = Path(path_to_validate)
             if not path_obj.exists():
                 raise PathNotFoundError(
-                    f"File path '{path_to_validate}' does not exist."
+                    f"{node.resource_type.capitalize()} path "
+                    f"'{path_to_validate}' does not exist."
                 )
             if not path_obj.is_file():
                 raise PathNotAFileError(
-                    f"File path '{path_to_validate}' is not a regular file."
+                    f"{node.resource_type.capitalize()} path "
+                    f"'{path_to_validate}' is not a regular file."
                 )
 
         # Final checks on a temporary / dummy Node
