@@ -63,6 +63,10 @@ class PathNotADirectoryError(NodeServiceError):
     """Raised when a node's configured path exists but is not a directory."""
 
 
+class PathNotAFileError(NodeServiceError):
+    """Raised when a node's configured path exists but is not a regular file."""
+
+
 class TreeNode:
     """A deterministic nested tree node representation."""
 
@@ -262,11 +266,20 @@ class NodeService:
             raise PathNotFoundError(
                 f"Path '{node.path}' for node '{node.name}' does not exist."
             )
-        if not path.is_dir():
-            raise PathNotADirectoryError(
-                f"Path '{node.path}' for node '{node.name}' "
-                "exists but is not a directory."
-            )
+
+        if node.node_kind == "resource":
+            if node.resource_type == "directory":
+                if not path.is_dir():
+                    raise PathNotADirectoryError(
+                        f"Path '{node.path}' for node '{node.name}' "
+                        "exists but is not a directory."
+                    )
+            elif node.resource_type == "file":
+                if not path.is_file():
+                    raise PathNotAFileError(
+                        f"Path '{node.path}' for node '{node.name}' "
+                        "exists but is not a regular file."
+                    )
 
         return path
 
@@ -297,6 +310,7 @@ class NodeService:
         - node_kind = "workspace" and resource_type = None
         - node_kind = "folder" and resource_type = None
         - node_kind = "resource" and resource_type = "directory"
+        - node_kind = "resource" and resource_type = "file"
 
         Raises:
             ValidationError: If any other combination is provided.
@@ -310,6 +324,8 @@ class NodeService:
         elif kind == "folder" and res_type is None:
             valid = True
         elif kind == "resource" and res_type == "directory":
+            valid = True
+        elif kind == "resource" and res_type == "file":
             valid = True
 
         if not valid:
@@ -365,6 +381,20 @@ class NodeService:
         # 5. Check structural workspace and folder nodes must not contain a path
         if node_kind in ("workspace", "folder") and normalized_path is not None:
             raise ValidationError("Structural nodes must not contain a path.")
+
+        # 5b. Check that a File resource has a valid existing file path
+        if node_kind == "resource" and resource_type == "file":
+            if not normalized_path:
+                raise ValidationError("File path cannot be empty.")
+            path_obj = Path(normalized_path)
+            if not path_obj.exists():
+                raise PathNotFoundError(
+                    f"File path '{normalized_path}' does not exist."
+                )
+            if not path_obj.is_file():
+                raise PathNotAFileError(
+                    f"File path '{normalized_path}' is not a regular file."
+                )
 
         # 6. Assign resource_type="directory" explicitly for directory resources
         if node_kind == "resource" and resource_type is None:
@@ -483,6 +513,21 @@ class NodeService:
             proposed_sort_order = kwargs["sort_order"]
         if "is_favorite" in kwargs:
             proposed_is_favorite = kwargs["is_favorite"]
+
+        # If node is a file resource, validate proposed path
+        if node.node_kind == "resource" and node.resource_type == "file":
+            path_to_validate = proposed_path
+            if not path_to_validate:
+                raise ValidationError("File path cannot be empty.")
+            path_obj = Path(path_to_validate)
+            if not path_obj.exists():
+                raise PathNotFoundError(
+                    f"File path '{path_to_validate}' does not exist."
+                )
+            if not path_obj.is_file():
+                raise PathNotAFileError(
+                    f"File path '{path_to_validate}' is not a regular file."
+                )
 
         # Final checks on a temporary / dummy Node
         dummy_node = Node(

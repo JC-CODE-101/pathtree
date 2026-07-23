@@ -135,10 +135,10 @@ class EditNodeDialog(ModalScreen[bool]):
                     id="input-name",
                 )
 
-            # Show path only for directory resource
-            is_directory = (
+            # Show path for directory and file resources
+            is_resource_with_path = (
                 self.node.node_kind == "resource"
-                and self.node.resource_type == "directory"
+                and self.node.resource_type in ("directory", "file")
             )
             with Vertical(classes="field-container", id="path-field-container") as vc:
                 yield Label("Path", classes="field-label")
@@ -147,7 +147,7 @@ class EditNodeDialog(ModalScreen[bool]):
                     placeholder="Enter path...",
                     id="input-path",
                 )
-                if not is_directory:
+                if not is_resource_with_path:
                     vc.display = False
 
             with Vertical(classes="field-container"):
@@ -210,10 +210,11 @@ class EditNodeDialog(ModalScreen[bool]):
                 yield Button("Save", variant="primary", id="btn-save")
 
     def on_input_changed(self, event: Input.Changed) -> None:
-        is_directory = (
-            self.node.node_kind == "resource" and self.node.resource_type == "directory"
+        is_resource_with_path = (
+            self.node.node_kind == "resource"
+            and self.node.resource_type in ("directory", "file")
         )
-        if event.input.id == "input-path" and is_directory:
+        if event.input.id == "input-path" and is_resource_with_path:
             path_val = event.value.strip()
             warning_area = self.query_one("#warning-area", Static)
             if path_val:
@@ -252,12 +253,13 @@ class EditNodeDialog(ModalScreen[bool]):
 
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
-        # Path is only saved/sent for Directory resources
-        is_directory = (
-            self.node.node_kind == "resource" and self.node.resource_type == "directory"
+        # Path is only saved/sent for Directory and File resources
+        is_resource_with_path = (
+            self.node.node_kind == "resource"
+            and self.node.resource_type in ("directory", "file")
         )
         path = None
-        if is_directory:
+        if is_resource_with_path:
             path_val = self.query_one("#input-path", Input).value or None
             if path_val is not None:
                 from pathtree.utils.path import normalize_path
@@ -272,7 +274,7 @@ class EditNodeDialog(ModalScreen[bool]):
             "sort_order": sort_order,
             "is_favorite": is_favorite,
         }
-        if is_directory:
+        if is_resource_with_path:
             kwargs["path"] = path
 
         # If temporary checkbox was displayed and got toggled to False, we're promoting
