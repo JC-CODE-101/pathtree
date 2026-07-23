@@ -19,6 +19,7 @@ from pathtree.services.node_service import (
     PathNotAFileError,
     PathNotFoundError,
 )
+from pathtree.utils.launcher import LaunchError, PlatformLauncher
 
 
 def test_registry_resolves_file_action_provider():
@@ -353,3 +354,42 @@ def test_file_may_not_have_children(session: Session, tmp_path):
             parent_id=file_node.id,
         )
     assert "is not allowed" in str(excinfo.value)
+
+
+@patch("sys.platform", "win32")
+@patch("os.startfile", create=True)
+def test_windows_uses_os_startfile_only(mock_startfile, tmp_path):
+    """Verify that on Windows, PlatformLauncher uses os.startfile only."""
+    dummy_file = tmp_path / "win_test.txt"
+    dummy_file.touch()
+
+    PlatformLauncher.open_path(str(dummy_file))
+    mock_startfile.assert_called_once_with(str(dummy_file))
+
+
+@patch("sys.platform", "win32")
+@patch("os.startfile", create=True)
+def test_windows_launch_error_on_startfile_failure(mock_startfile, tmp_path):
+    """Verify that expected startfile failure raises LaunchError."""
+    dummy_file = tmp_path / "win_fail.txt"
+    dummy_file.touch()
+
+    mock_startfile.side_effect = OSError("Access denied")
+
+    with pytest.raises(LaunchError) as exc:
+        PlatformLauncher.open_path(str(dummy_file))
+    assert "Failed to open path" in str(exc.value)
+
+
+@patch("sys.platform", "linux")
+@patch("subprocess.Popen")
+@patch("shutil.which")
+def test_linux_uses_xdg_open(mock_which, mock_popen, tmp_path):
+    """Verify that on Linux, PlatformLauncher uses xdg-open."""
+    dummy_file = tmp_path / "linux_test.txt"
+    dummy_file.touch()
+
+    mock_which.return_value = "/usr/bin/xdg-open"
+
+    PlatformLauncher.open_path(str(dummy_file))
+    mock_popen.assert_called_once_with(["xdg-open", str(dummy_file)])

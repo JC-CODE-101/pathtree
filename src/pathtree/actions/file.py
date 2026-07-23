@@ -117,7 +117,7 @@ class FileActionProvider(ResourceActionProvider):
                 argv = shlex.split(editor_cmd)
                 if not argv:
                     raise ValueError("Empty editor command.")
-            except Exception as e:
+            except ValueError as e:
                 return ResourceActionResult(
                     success=False,
                     error_message=f"Failed to parse editor command: {e}",

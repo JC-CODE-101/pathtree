@@ -33,33 +33,29 @@ class PlatformLauncher:
             raise LaunchError(f"Path '{path}' does not exist.")
 
         # Determine platform launcher
+        if sys.platform == "win32":
+            try:
+                os.startfile(path)
+                return
+            except AttributeError as e:
+                raise LaunchError(f"System default launcher is unavailable: {e}") from e
+            except OSError as e:
+                raise LaunchError(f"Failed to open path: {e}") from e
+
         if sys.platform.startswith("linux"):
             launcher = "xdg-open"
         elif sys.platform == "darwin":
             launcher = "open"
-        elif sys.platform == "win32":
-            try:
-                os.startfile(path)
-                return
-            except AttributeError:
-                # Fallback if os.startfile is not available (e.g. non-Windows test env)
-                launcher = "start"
         else:
             raise LaunchError(f"Unsupported platform: {sys.platform}")
 
         # Check launcher availability
-        if launcher != "start":
-            if not shutil.which(launcher):
-                raise LaunchError(f"System default launcher '{launcher}' not found.")
+        if not shutil.which(launcher):
+            raise LaunchError(f"System default launcher '{launcher}' not found.")
 
         try:
-            if launcher == "start":
-                # For Windows testing/fallback if startfile is missing
-                # We use cmd /c start which is standard but we pass argv safely
-                subprocess.Popen(["cmd", "/c", "start", "", path])
-            else:
-                subprocess.Popen([launcher, path])
-        except Exception as e:
+            subprocess.Popen([launcher, path])
+        except (OSError, ValueError) as e:
             raise LaunchError(f"Failed to open path: {e}") from e
 
     @classmethod
@@ -86,5 +82,5 @@ class PlatformLauncher:
 
         try:
             subprocess.Popen(argv)
-        except Exception as e:
+        except (OSError, ValueError) as e:
             raise LaunchError(f"Failed to launch editor: {e}") from e
