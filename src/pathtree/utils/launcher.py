@@ -124,3 +124,125 @@ class PlatformLauncher:
             return ProcessLaunchResult(
                 success=False, error_message=f"Failed to launch process: {e!s}"
             )
+
+    @classmethod
+    def launch_in_terminal(cls, argv: list[str], cwd: Path) -> ProcessLaunchResult:
+        """Launch command safely inside a new visible terminal window context."""
+        import tempfile
+        import uuid
+
+        suffix = ".command" if sys.platform == "darwin" else ".py"
+        temp_path = (
+            Path(tempfile.gettempdir()) / f"pathtree_run_{uuid.uuid4().hex}{suffix}"
+        )
+
+        # Write self-contained python executor script
+        content = (
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "import subprocess\n\n"
+            "cwd = " + repr(str(cwd)) + "\n"
+            "argv = " + repr(argv) + "\n\n"
+            'print("=========================================")\n'
+            'print("PathTree Script Executor")\n'
+            'print("=========================================")\n'
+            'print(f"Working Directory: {cwd}")\n'
+            "print(f\"Command: {' '.join(argv)}\\n\")\n\n"
+            "try:\n"
+            "    p = subprocess.Popen(argv, cwd=cwd)\n"
+            "    p.wait()\n"
+            '    print(f"\\nScript finished with exit status: {p.returncode}.")\n'
+            "except Exception as e:\n"
+            '    print(f"\\nFailed to execute script: {e}")\n\n'
+            'print("=========================================")\n'
+            'input("Press Enter to close this window...")\n'
+        )
+        try:
+            temp_path.write_text(content, encoding="utf-8")
+            if sys.platform != "win32":
+                os.chmod(temp_path, 0o755)
+        except OSError as e:
+            return ProcessLaunchResult(
+                success=False,
+                error_message=f"Failed to write execution wrapper: {e}",
+            )
+
+        # Resolve terminal emulator and command list
+        if sys.platform == "darwin":
+            term_argv = ["open", "-a", "Terminal.app", str(temp_path)]
+        elif sys.platform == "win32":
+            if shutil.which("wt"):
+                term_argv = ["wt", "new-tab", sys.executable, str(temp_path)]
+            else:
+                term_argv = ["cmd.exe", "/c", "start", sys.executable, str(temp_path)]
+        else:
+            # Linux and other Unix-like OSes
+            env_terminal = os.environ.get("TERMINAL")
+            resolved_term = None
+            if env_terminal:
+                import shlex
+
+                tokens = shlex.split(env_terminal)
+                resolved_path = shutil.which(tokens[0]) if tokens else None
+                if resolved_path:
+                    resolved_term = resolved_path
+
+            if not resolved_term:
+                for term in [
+                    "x-terminal-emulator",
+                    "kitty",
+                    "alacritty",
+                    "wezterm",
+                    "gnome-terminal",
+                    "konsole",
+                    "xfce4-terminal",
+                    "xterm",
+                ]:
+                    resolved_path = shutil.which(term)
+                    if resolved_path:
+                        resolved_term = resolved_path
+                        break
+
+            if not resolved_term:
+                return ProcessLaunchResult(
+                    success=False,
+                    error_message=(
+                        "No supported terminal emulator found "
+                        "(tried $TERMINAL, x-terminal-emulator, kitty, alacritty, "
+                        "wezterm, gnome-terminal, konsole, xfce4-terminal, xterm)."
+                    ),
+                )
+
+            base = os.path.basename(resolved_term)
+            if base == "gnome-terminal":
+                term_argv = [resolved_term, "--", sys.executable, str(temp_path)]
+            elif base == "konsole":
+                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+            elif base == "xfce4-terminal":
+                term_argv = [resolved_term, "-x", sys.executable, str(temp_path)]
+            elif base == "kitty":
+                term_argv = [resolved_term, "--", sys.executable, str(temp_path)]
+            elif base == "alacritty":
+                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+            elif base == "wezterm":
+                term_argv = [
+                    resolved_term,
+                    "start",
+                    "--",
+                    sys.executable,
+                    str(temp_path),
+                ]
+            elif base == "xterm":
+                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+            else:
+                term_argv = [resolved_term, "-e", sys.executable, str(temp_path)]
+
+        # Launch the resolved terminal emulator in background
+        try:
+            proc = subprocess.Popen(term_argv)
+            return ProcessLaunchResult(success=True, pid=proc.pid)
+        except OSError as e:
+            return ProcessLaunchResult(
+                success=False,
+                error_message=f"Failed to launch terminal emulator: {e}",
+            )

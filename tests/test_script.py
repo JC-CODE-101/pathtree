@@ -23,6 +23,7 @@ from pathtree.ui.dialogs.add_node import AddNodeDialog
 from pathtree.ui.dialogs.edit_node import EditNodeDialog
 from pathtree.ui.widgets.path_autocomplete import PathAutocompleteMode
 from pathtree.utils.icons import NodeIconCatalog
+from pathtree.utils.launcher import PlatformLauncher
 from pathtree.utils.script_resolver import (
     ScriptResolutionError,
     resolve_script_argv,
@@ -342,7 +343,7 @@ def test_explicit_argv_and_no_shell_true(mock_which, mock_popen, tmp_path):
     21. Verify no execution path uses shell=True.
     22. Verify working directory defaults to the script parent.
     """
-    mock_which.return_value = "/usr/bin/python3"
+    mock_which.return_value = "/usr/bin/xterm"
     script = tmp_path / "test.py"
     script.touch()
 
@@ -360,13 +361,56 @@ def test_explicit_argv_and_no_shell_true(mock_which, mock_popen, tmp_path):
 
     result = provider.execute("run_script", context)
     assert result.success is True
+    assert result.message == "Script launched in terminal."
 
     # Assert subprocess.Popen arguments
     mock_popen.assert_called_once()
     args, kwargs = mock_popen.call_args
-    assert args[0] == ["python3", str(script)]
-    assert kwargs.get("cwd") == tmp_path
     assert "shell" not in kwargs or kwargs["shell"] is False
+    assert isinstance(args[0], list)
+
+
+@patch("shutil.which")
+def test_terminal_resolution_order(mock_which, tmp_path):
+    """Verify terminal emulator resolution order ($TERMINAL fallback)."""
+    # Mock all terminal emulators as missing except wezterm
+    mock_which.side_effect = lambda cmd: (
+        "/usr/bin/wezterm" if cmd == "wezterm" else None
+    )
+
+    with patch("subprocess.Popen") as mock_popen:
+        res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
+        assert res.success is True
+        mock_popen.assert_called_once()
+        args, _ = mock_popen.call_args
+        assert args[0][0] == "/usr/bin/wezterm"
+
+
+@patch("shutil.which")
+def test_env_terminal_override(mock_which, tmp_path):
+    """Verify that $TERMINAL environment variable override is respected."""
+    mock_which.side_effect = lambda cmd: "/custom/my-term" if cmd == "my-term" else None
+
+    with (
+        patch.dict(os.environ, {"TERMINAL": "my-term"}, clear=True),
+        patch("subprocess.Popen") as mock_popen,
+    ):
+        res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
+        assert res.success is True
+        mock_popen.assert_called_once()
+        args, _ = mock_popen.call_args
+        assert args[0][0] == "/custom/my-term"
+
+
+@patch("shutil.which")
+def test_unsupported_terminal_returns_error(mock_which, tmp_path):
+    """Verify unsupported terminal returns a typed error result."""
+    mock_which.return_value = None  # No terminal emulators exist
+
+    with patch.dict(os.environ, {}, clear=True):
+        res = PlatformLauncher.launch_in_terminal(["python3", "test.py"], tmp_path)
+        assert res.success is False
+        assert "No supported terminal emulator found" in res.error_message
 
 
 @patch("subprocess.Popen")

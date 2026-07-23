@@ -104,7 +104,7 @@ class ScriptActionProvider(ResourceActionProvider):
             # Working directory for execution is the parent directory of the script
             cwd = path_obj.parent
 
-            res = PlatformLauncher.launch_process(argv, cwd=cwd)
+            res = PlatformLauncher.launch_in_terminal(argv, cwd=cwd)
             if not res.success:
                 return ResourceActionResult(
                     success=False,
@@ -114,7 +114,7 @@ class ScriptActionProvider(ResourceActionProvider):
             return ResourceActionResult(
                 success=True,
                 exit_app=False,
-                message=f"Successfully executed script: {path_obj.name}",
+                message="Script launched in terminal.",
                 target=ResourceActionResultTarget.NOTIFICATION,
             )
 
