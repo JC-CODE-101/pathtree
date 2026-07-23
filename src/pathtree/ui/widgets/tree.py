@@ -38,6 +38,7 @@ class NodeTreeView(Tree[uuid.UUID]):
     """Custom tree widget wrapping Textual's Tree."""
 
     BINDINGS: ClassVar[list[Binding]] = [
+        Binding("enter", "activate_cursor", "Activate", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("down", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -63,6 +64,14 @@ class NodeTreeView(Tree[uuid.UUID]):
         Binding("O", "open_action_menu", "Open Action Menu", show=False),
         Binding("shift+o", "open_action_menu", "Open Action Menu", show=False),
     ]
+
+    class ActivateNode(Message):
+        """Sent when a node is activated (via Enter or Double Click)."""
+
+        def __init__(self, node_id: uuid.UUID) -> None:
+            """Initialize with a node ID."""
+            super().__init__()
+            self.node_id = node_id
 
     class OpenActionMenu(Message):
         """Sent when the 'o' key is pressed to open the action menu."""
@@ -356,6 +365,12 @@ class NodeTreeView(Tree[uuid.UUID]):
         if not node.is_expanded and node.allow_expand:
             node.expand()
 
+    def action_activate_cursor(self) -> None:
+        """Activate the currently highlighted node."""
+        node = self.cursor_node
+        if node is not None and node.data is not None:
+            self.post_message(self.ActivateNode(node.data))
+
     async def _on_click(self, event: events.Click) -> None:
         """Custom mouse click and double-click handling.
 
@@ -364,20 +379,20 @@ class NodeTreeView(Tree[uuid.UUID]):
         Double left click executes the default action on executable resource nodes.
         Workspace and Folder nodes are not treated as executable resources.
         """
-        async with self.lock:
-            meta = event.style.meta
-            if "line" in meta:
-                cursor_line = meta["line"]
-                if meta.get("toggle", False):
-                    node = self.get_node_at_line(cursor_line)
-                    if node is not None:
-                        self._toggle_node(node)
-                else:
-                    self.cursor_line = cursor_line
+        meta = event.style.meta
+        if "line" in meta:
+            cursor_line = meta["line"]
+            if meta.get("toggle", False):
+                await super()._on_click(event)
+                return
 
-                    if event.chain >= 2:
-                        node = self.get_node_at_line(cursor_line)
-                        if node is not None and node.data is not None:
-                            db_node = self.node_service.get_node(node.data)
-                            if db_node is not None and db_node.node_kind == "resource":
-                                self.post_message(Tree.NodeSelected(node))
+            if event.chain >= 2:
+                node = self.get_node_at_line(cursor_line)
+                if node is not None and node.data is not None:
+                    db_node = self.node_service.get_node(node.data)
+                    if db_node is not None and db_node.node_kind == "resource":
+                        self.post_message(self.ActivateNode(node.data))
+                event.stop()
+                return
+
+        await super()._on_click(event)

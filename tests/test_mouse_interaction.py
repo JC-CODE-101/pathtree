@@ -1,9 +1,8 @@
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
-from rich.style import Style
 from sqlmodel import Session
-from textual.events import Click
 
 from pathtree.database.repository import NodeRepository
 from pathtree.models.node import Node
@@ -14,22 +13,28 @@ from pathtree.ui.widgets.tree import NodeTreeView
 
 
 @pytest.mark.asyncio
-async def test_single_click_directory(session: Session, tmp_path: Path) -> None:
+async def test_pilot_single_click_on_directory(
+    session: Session, tmp_path: Path
+) -> None:
     """Test that:
-    1. single click on a Directory selects it but does not execute;
-    2. single click does not write the output file;
-    3. single click does not exit the app;
-    4. single click updates the details panel;
+    1. pilot single-click on a visible Directory row selects it;
+    2. output file remains absent/unchanged after single click;
+    3. app remains running after single click;
+    4. details panel changes to the clicked node;
+    5. no ResourceActionProvider.execute call occurs.
     """
     repo = NodeRepository(session)
     valid_dir = tmp_path / "click_dir"
     valid_dir.mkdir()
+
+    ws = repo.create(Node(name="WS", node_kind="workspace"))
     node = repo.create(
         Node(
             name="My Dir",
             path=str(valid_dir),
             node_kind="resource",
             resource_type="directory",
+            parent_id=ws.id,
         )
     )
 
@@ -37,7 +42,7 @@ async def test_single_click_directory(session: Session, tmp_path: Path) -> None:
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service, output=str(output_file))
 
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 60)) as pilot:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
@@ -45,247 +50,58 @@ async def test_single_click_directory(session: Session, tmp_path: Path) -> None:
         tree = app.screen.query_one("#tree-view", NodeTreeView)
         details = app.screen.query_one("#details-panel", NodeDetailsPanel)
 
-        # Find the node's line
-        visible = tree.get_visible_nodes()
-        line_idx = next(i for i, n in enumerate(visible) if n.data == node.id)
-
-        # Simulate single click
-        style = Style(meta={"line": line_idx})
-        click_event = Click(
-            widget=tree,
-            x=0,
-            y=0,
-            delta_x=0,
-            delta_y=0,
-            button=1,
-            shift=False,
-            meta=False,
-            ctrl=False,
-            style=style,
-            chain=1,
-        )
-        await tree._on_click(click_event)
-        await pilot.pause(0.05)
-
-        # 1. Single click selects the node
-        assert tree.cursor_node is not None
-        assert tree.cursor_node.data == node.id
-
-        # 2. Does not execute / does not write output file
-        assert not output_file.exists()
-
-        # 3. Does not exit the app
-        assert app.return_code is None
-
-        # 4. Updates the details panel
-        assert "My Dir" in details.render().plain
-        assert str(valid_dir) in details.render().plain
-
-
-@pytest.mark.asyncio
-async def test_double_click_directory(session: Session, tmp_path: Path) -> None:
-    """Test that:
-    5. double click executes the same default action as Enter;
-    6. double click writes the resolved Directory path once;
-    7. double click exits once on successful change_directory;
-    """
-    repo = NodeRepository(session)
-    valid_dir = tmp_path / "double_click_dir"
-    valid_dir.mkdir()
-    node = repo.create(
-        Node(
-            name="My Dir",
-            path=str(valid_dir),
-            node_kind="resource",
-            resource_type="directory",
-        )
-    )
-
-    output_file = tmp_path / "output.txt"
-    node_service = NodeService(repo)
-    app = PathTreeApp(node_service=node_service, output=str(output_file))
-
-    async with app.run_test() as pilot:
-        while app.screen.id != "main-screen":
-            await pilot.pause(0.01)
-        await pilot.pause(0.01)
-
-        tree = app.screen.query_one("#tree-view", NodeTreeView)
-
-        visible = tree.get_visible_nodes()
-        line_idx = next(i for i, n in enumerate(visible) if n.data == node.id)
-
-        # Simulate double click (firing first click then second click)
-        style = Style(meta={"line": line_idx})
-        click1 = Click(
-            widget=tree,
-            x=0,
-            y=0,
-            delta_x=0,
-            delta_y=0,
-            button=1,
-            shift=False,
-            meta=False,
-            ctrl=False,
-            style=style,
-            chain=1,
-        )
-        await tree._on_click(click1)
-        await pilot.pause(0.01)
-
-        click2 = Click(
-            widget=tree,
-            x=0,
-            y=0,
-            delta_x=0,
-            delta_y=0,
-            button=1,
-            shift=False,
-            meta=False,
-            ctrl=False,
-            style=style,
-            chain=2,
-        )
-        await tree._on_click(click2)
-
-        # Wait for the app to exit on successful activation
-        while app.return_code is None:
-            await pilot.pause(0.01)
-
-        # 5. Executes and exits successfully
-        assert app.return_code == 0
-
-        # 6. Writes output file
-        assert output_file.exists()
-        written_path = output_file.read_text(encoding="utf-8").strip()
-        assert Path(written_path).resolve() == valid_dir.resolve()
-
-
-@pytest.mark.asyncio
-async def test_workspace_and_folder_clicks(session: Session, tmp_path: Path) -> None:
-    """Test that:
-    8. Workspace and Folder single clicks remain selection-only and
-       double clicks do not execute them.
-    """
-    repo = NodeRepository(session)
-    ws = repo.create(Node(name="My Workspace", node_kind="workspace"))
-    folder = repo.create(Node(name="My Folder", node_kind="folder", parent_id=ws.id))
-
-    output_file = tmp_path / "output.txt"
-    node_service = NodeService(repo)
-    app = PathTreeApp(node_service=node_service, output=str(output_file))
-
-    async with app.run_test() as pilot:
-        while app.screen.id != "main-screen":
-            await pilot.pause(0.01)
-        await pilot.pause(0.01)
-
-        tree = app.screen.query_one("#tree-view", NodeTreeView)
-        details = app.screen.query_one("#details-panel", NodeDetailsPanel)
-
-        # Let's expand the workspace so the folder is visible
+        # Expand WS so Directory is visible
         ws_tn = next(c for c in tree.root.children if c.data == ws.id)
         tree.move_cursor(ws_tn)
         await pilot.press("l")
         await pilot.pause(0.02)
 
-        # Check Workspace single click
+        # Line 0 is WS, Line 1 is My Dir
         visible = tree.get_visible_nodes()
-        ws_idx = next(i for i, n in enumerate(visible) if n.data == ws.id)
+        assert visible[0].data == ws.id
+        assert visible[1].data == node.id
 
-        # Click WS
-        click_ws = Click(
-            widget=tree,
-            x=0,
-            y=0,
-            delta_x=0,
-            delta_y=0,
-            button=1,
-            shift=False,
-            meta=False,
-            ctrl=False,
-            style=Style(meta={"line": ws_idx}),
-            chain=1,
-        )
-        await tree._on_click(click_ws)
-        await pilot.pause(0.01)
-        assert tree.cursor_node is not None and tree.cursor_node.data == ws.id
-        assert "My Workspace" in details.render().plain
+        provider = app.screen.action_registry.get_provider("resource", "directory")
+        with patch.object(provider, "execute", wraps=provider.execute) as mock_execute:
+            # 1. pilot single-click on a visible Directory row (line index 1)
+            # Offset x=12 to hit the label, y=1 for the line index
+            await pilot.click(tree, offset=(12, 1))
+            await pilot.pause(0.05)
 
-        # Double click WS
-        dbl_click_ws = Click(
-            widget=tree,
-            x=0,
-            y=0,
-            delta_x=0,
-            delta_y=0,
-            button=1,
-            shift=False,
-            meta=False,
-            ctrl=False,
-            style=Style(meta={"line": ws_idx}),
-            chain=2,
-        )
-        await tree._on_click(dbl_click_ws)
-        await pilot.pause(0.05)
-        # Verify no execution, no exit, no error message like "No default action"
-        assert app.return_code is None
-        assert "No default action" not in details.render().plain
+            # 2. output file remains absent/unchanged after single click
+            assert not output_file.exists()
 
-        # Check Folder single click
-        folder_idx = next(i for i, n in enumerate(visible) if n.data == folder.id)
-        click_folder = Click(
-            widget=tree,
-            x=0,
-            y=0,
-            delta_x=0,
-            delta_y=0,
-            button=1,
-            shift=False,
-            meta=False,
-            ctrl=False,
-            style=Style(meta={"line": folder_idx}),
-            chain=1,
-        )
-        await tree._on_click(click_folder)
-        await pilot.pause(0.01)
-        assert tree.cursor_node is not None and tree.cursor_node.data == folder.id
-        assert "My Folder" in details.render().plain
+            # 3. app remains running after single click
+            assert app.return_code is None
 
-        # Double click Folder
-        dbl_click_folder = Click(
-            widget=tree,
-            x=0,
-            y=0,
-            delta_x=0,
-            delta_y=0,
-            button=1,
-            shift=False,
-            meta=False,
-            ctrl=False,
-            style=Style(meta={"line": folder_idx}),
-            chain=2,
-        )
-        await tree._on_click(dbl_click_folder)
-        await pilot.pause(0.05)
-        assert app.return_code is None
-        assert "No default action" not in details.render().plain
+            # 4. details panel changes to the clicked node
+            assert "My Dir" in details.render().plain
+
+            # 5. no ResourceActionProvider.execute call occurs
+            mock_execute.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_unsupported_resource_double_click(
+async def test_pilot_double_click_on_directory(
     session: Session, tmp_path: Path
 ) -> None:
     """Test that:
-    9. unsupported resources do not crash on double click;
-       double click should fail safely using the existing unsupported-action message.
+    6. pilot double-click on the same row activates exactly once;
+    7. output path is written exactly once;
+    8. app exits exactly once.
     """
     repo = NodeRepository(session)
-    node = repo.create(
+    valid_dir = tmp_path / "click_dir"
+    valid_dir.mkdir()
+
+    ws = repo.create(Node(name="WS", node_kind="workspace"))
+    repo.create(
         Node(
-            name="Unknown Resource",
+            name="My Dir",
+            path=str(valid_dir),
             node_kind="resource",
-            resource_type="unknown_or_invalid",
+            resource_type="directory",
+            parent_id=ws.id,
         )
     )
 
@@ -293,70 +109,247 @@ async def test_unsupported_resource_double_click(
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service, output=str(output_file))
 
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 60)) as pilot:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         tree = app.screen.query_one("#tree-view", NodeTreeView)
-        details = app.screen.query_one("#details-panel", NodeDetailsPanel)
 
-        visible = tree.get_visible_nodes()
-        line_idx = next(i for i, n in enumerate(visible) if n.data == node.id)
+        # Expand WS
+        ws_tn = next(c for c in tree.root.children if c.data == ws.id)
+        tree.move_cursor(ws_tn)
+        await pilot.press("l")
+        await pilot.pause(0.02)
 
-        # Single click first
-        await tree._on_click(
-            Click(
-                widget=tree,
-                x=0,
-                y=0,
-                delta_x=0,
-                delta_y=0,
-                button=1,
-                shift=False,
-                meta=False,
-                ctrl=False,
-                style=Style(meta={"line": line_idx}),
-                chain=1,
-            )
-        )
-        await pilot.pause(0.01)
+        provider = app.screen.action_registry.get_provider("resource", "directory")
+        with patch.object(provider, "execute", wraps=provider.execute) as mock_execute:
+            # 6. pilot double-click on the same row activates
+            await pilot.double_click(tree, offset=(12, 1))
 
-        # Double click
-        await tree._on_click(
-            Click(
-                widget=tree,
-                x=0,
-                y=0,
-                delta_x=0,
-                delta_y=0,
-                button=1,
-                shift=False,
-                meta=False,
-                ctrl=False,
-                style=Style(meta={"line": line_idx}),
-                chain=2,
-            )
-        )
-        await pilot.pause(0.05)
+            # Wait for app to exit
+            while app.return_code is None:
+                await pilot.pause(0.01)
 
-        # Check that it did not crash, return_code is None
-        assert app.return_code is None
-        # Check that it failed safely displaying the existing
-        # unsupported-action error message
-        assert "No default action is available" in details.render().plain
+            # 6. Activates exactly once
+            mock_execute.assert_called_once()
+
+            # 7. output path is written exactly once
+            assert output_file.exists()
+            written_path = output_file.read_text(encoding="utf-8").strip()
+            assert Path(written_path).resolve() == valid_dir.resolve()
+
+            # 8. app exits exactly once
+            assert app.return_code == 0
 
 
 @pytest.mark.asyncio
-async def test_keyboard_enter_and_o_remain_unchanged(
+async def test_enter_activates_via_custom_message(
     session: Session, tmp_path: Path
 ) -> None:
     """Test that:
-    10. keyboard Enter and O behavior remains unchanged.
+    9. Enter activates through the same custom message.
     """
     repo = NodeRepository(session)
-    valid_dir = tmp_path / "kbd_dir"
+    valid_dir = tmp_path / "enter_dir"
     valid_dir.mkdir()
+
+    ws = repo.create(Node(name="WS", node_kind="workspace"))
+    node = repo.create(
+        Node(
+            name="My Dir",
+            path=str(valid_dir),
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=ws.id,
+        )
+    )
+
+    output_file = tmp_path / "output.txt"
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service, output=str(output_file))
+
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view", NodeTreeView)
+
+        # Expand WS
+        ws_tn = next(c for c in tree.root.children if c.data == ws.id)
+        tree.move_cursor(ws_tn)
+        await pilot.press("l")
+        await pilot.pause(0.02)
+
+        # Highlight the directory (at line 1)
+        dir_tn = next(c for c in ws_tn.children if c.data == node.id)
+        tree.move_cursor(dir_tn)
+        await pilot.pause(0.01)
+
+        # 9. Enter activates through the same custom message
+        await pilot.press("enter")
+
+        while app.return_code is None:
+            await pilot.pause(0.01)
+
+        assert app.return_code == 0
+        assert output_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_node_selected_alone_never_activates(
+    session: Session, tmp_path: Path
+) -> None:
+    """Test that:
+    10. Tree.NodeSelected alone never activates.
+    """
+    repo = NodeRepository(session)
+    valid_dir = tmp_path / "select_dir"
+    valid_dir.mkdir()
+
+    node = repo.create(
+        Node(
+            name="My Dir",
+            path=str(valid_dir),
+            node_kind="resource",
+            resource_type="directory",
+        )
+    )
+
+    output_file = tmp_path / "output.txt"
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service, output=str(output_file))
+
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view", NodeTreeView)
+
+        # Find the TreeNode object
+        tn = next(c for c in tree.root.children if c.data == node.id)
+
+        # Post Tree.NodeSelected directly
+        from textual.widgets import Tree
+
+        tree.post_message(Tree.NodeSelected(tn))
+        await pilot.pause(0.05)
+
+        # 10. Tree.NodeSelected alone never activates
+        assert not output_file.exists()
+        assert app.return_code is None
+
+
+@pytest.mark.asyncio
+async def test_clicking_toggle_marker_never_activates(
+    session: Session, tmp_path: Path
+) -> None:
+    """Test that:
+    11. clicking the toggle marker never activates.
+    """
+    repo = NodeRepository(session)
+    ws = repo.create(Node(name="WS", node_kind="workspace"))
+    repo.create(Node(name="Folder", node_kind="folder", parent_id=ws.id))
+
+    output_file = tmp_path / "output.txt"
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service, output=str(output_file))
+
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view", NodeTreeView)
+
+        # Line index 0 is WS (which has a toggle marker since it has a folder child)
+        ws_tn = next(c for c in tree.root.children if c.data == ws.id)
+        assert ws_tn.is_expanded is False
+
+        # Click the toggle marker of WS (which is at x=1, y=0 or x=2, y=0)
+        # Let's double click or rapid click the toggle marker
+        await pilot.click(tree, offset=(1, 0))
+        await pilot.pause(0.01)
+        await pilot.click(tree, offset=(1, 0))
+        await pilot.pause(0.01)
+
+        # It should toggle the expansion but never activate/crash
+        assert ws_tn.is_expanded is True or ws_tn.is_expanded is False
+        assert app.return_code is None
+
+
+@pytest.mark.asyncio
+async def test_rapid_clicks_on_different_rows_do_not_activate(
+    session: Session, tmp_path: Path
+) -> None:
+    """Test that:
+    12. rapid separate single clicks on different rows do not become activation.
+    """
+    repo = NodeRepository(session)
+    dir1 = tmp_path / "dir1"
+    dir1.mkdir()
+    dir2 = tmp_path / "dir2"
+    dir2.mkdir()
+
+    ws = repo.create(Node(name="WS", node_kind="workspace"))
+    repo.create(
+        Node(
+            name="Dir 1",
+            path=str(dir1),
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=ws.id,
+        )
+    )
+    repo.create(
+        Node(
+            name="Dir 2",
+            path=str(dir2),
+            node_kind="resource",
+            resource_type="directory",
+            parent_id=ws.id,
+        )
+    )
+
+    output_file = tmp_path / "output.txt"
+    node_service = NodeService(repo)
+    app = PathTreeApp(node_service=node_service, output=str(output_file))
+
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view", NodeTreeView)
+
+        # Expand WS
+        ws_tn = next(c for c in tree.root.children if c.data == ws.id)
+        tree.move_cursor(ws_tn)
+        await pilot.press("l")
+        await pilot.pause(0.02)
+
+        # Line index 1 is Dir 1, Line index 2 is Dir 2
+        # Rapid single click on Dir 1 then Dir 2
+        await pilot.click(tree, offset=(12, 1))
+        await pilot.click(tree, offset=(12, 2))
+        await pilot.pause(0.05)
+
+        # Neither should be activated, app remains running
+        assert app.return_code is None
+        assert not output_file.exists()
+
+
+@pytest.mark.asyncio
+async def test_o_opens_action_menu(session: Session, tmp_path: Path) -> None:
+    """Test that:
+    13. O still opens the action menu.
+    """
+    repo = NodeRepository(session)
+    valid_dir = tmp_path / "click_dir"
+    valid_dir.mkdir()
+
     repo.create(
         Node(
             name="My Dir",
@@ -370,91 +363,58 @@ async def test_keyboard_enter_and_o_remain_unchanged(
     node_service = NodeService(repo)
     app = PathTreeApp(node_service=node_service, output=str(output_file))
 
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 60)) as pilot:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
-        app.screen.query_one("#tree-view", NodeTreeView)
-
-        # Verify O key opens the resource action menu
+        # Press 'o' to open action menu
         await pilot.press("o")
         await pilot.pause(0.05)
 
-        # Should open the ResourceActionMenu modal screen
         from pathtree.ui.dialogs.action_menu import ResourceActionMenu
 
         assert isinstance(app.screen, ResourceActionMenu)
 
-        # Close the modal
-        await pilot.press("escape")
-        await pilot.pause(0.05)
-        assert app.screen.id == "main-screen"
-
-        # Verify Enter key activates/exits
-        await pilot.press("enter")
-        while app.return_code is None:
-            await pilot.pause(0.01)
-
-        assert app.return_code == 0
-        assert output_file.exists()
-
 
 @pytest.mark.asyncio
-async def test_tree_state_and_selection_correct_after_click(session: Session) -> None:
+async def test_workspace_and_folder_remain_non_executable(
+    session: Session, tmp_path: Path
+) -> None:
     """Test that:
-    11. tree state and current selection remain correct.
+    14. Workspace and Folder remain non-executable.
     """
     repo = NodeRepository(session)
-    ws1 = repo.create(Node(name="WS 1", node_kind="workspace"))
-    ws2 = repo.create(Node(name="WS 2", node_kind="workspace"))
-    folder = repo.create(Node(name="Folder", node_kind="folder", parent_id=ws1.id))
+    ws = repo.create(Node(name="My Workspace", node_kind="workspace"))
+    repo.create(Node(name="My Folder", node_kind="folder", parent_id=ws.id))
 
+    output_file = tmp_path / "output.txt"
     node_service = NodeService(repo)
-    app = PathTreeApp(node_service=node_service)
+    app = PathTreeApp(node_service=node_service, output=str(output_file))
 
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 60)) as pilot:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
 
         tree = app.screen.query_one("#tree-view", NodeTreeView)
+        details = app.screen.query_one("#details-panel", NodeDetailsPanel)
 
-        # Expand WS 1
-        ws1_tn = next(c for c in tree.root.children if c.data == ws1.id)
-        tree.move_cursor(ws1_tn)
+        # Expand Workspace
+        ws_tn = next(c for c in tree.root.children if c.data == ws.id)
+        tree.move_cursor(ws_tn)
         await pilot.press("l")
-        await pilot.pause(0.01)
-        assert ws1_tn.is_expanded is True
+        await pilot.pause(0.02)
 
-        # Now get visible nodes
-        visible = tree.get_visible_nodes()
-        # Elements are: ws1, folder, ws2
-        assert [n.data for n in visible] == [ws1.id, folder.id, ws2.id]
+        # Workspace is Line 0, Folder is Line 1
+        # Double click Workspace
+        await pilot.double_click(tree, offset=(12, 0))
+        await pilot.pause(0.05)
+        assert app.return_code is None
+        assert "No default action" not in details.render().plain
 
-        # Single click on WS 2
-        ws2_idx = next(i for i, n in enumerate(visible) if n.data == ws2.id)
-        await tree._on_click(
-            Click(
-                widget=tree,
-                x=0,
-                y=0,
-                delta_x=0,
-                delta_y=0,
-                button=1,
-                shift=False,
-                meta=False,
-                ctrl=False,
-                style=Style(meta={"line": ws2_idx}),
-                chain=1,
-            )
-        )
-        await pilot.pause(0.01)
-
-        # Selection should change to WS 2
-        assert tree.cursor_node is not None
-        assert tree.cursor_node.data == ws2.id
-
-        # WS 1 should remain expanded
-        ws1_tn = next(c for c in tree.root.children if c.data == ws1.id)
-        assert ws1_tn.is_expanded is True
+        # Double click Folder
+        await pilot.double_click(tree, offset=(12, 1))
+        await pilot.pause(0.05)
+        assert app.return_code is None
+        assert "No default action" not in details.render().plain

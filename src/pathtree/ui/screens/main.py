@@ -220,15 +220,9 @@ class MainScreen(Screen[None]):
         """Update the details panel whenever the highlighted node changes."""
         self._update_details_and_selection()
 
-    def on_tree_node_selected(self, event: Tree.NodeSelected[uuid.UUID]) -> None:
-        """Handle node activation when Enter is pressed on a node."""
-        tree = self.query_one("#tree-view", NodeTreeView)
-        if not tree.has_focus:
-            return
-        node_id = event.node.data
-        if node_id is None:
-            return
-        self.activate_node(node_id)
+    def on_node_tree_view_activate_node(self, event: NodeTreeView.ActivateNode) -> None:
+        """Handle the custom ActivateNode message from the tree view."""
+        self.activate_node(event.node_id)
 
     def action_activate_selected(self) -> None:
         """Fallback action to activate the currently highlighted node."""
@@ -236,7 +230,7 @@ class MainScreen(Screen[None]):
         if not tree.has_focus:
             return
         if tree.cursor_node is not None and tree.cursor_node.data is not None:
-            self.activate_node(tree.cursor_node.data)
+            self.post_message(NodeTreeView.ActivateNode(tree.cursor_node.data))
 
     def action_quit(self) -> None:
         """Quit the application safely with exit code 0."""
