@@ -3,6 +3,7 @@ import uuid
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -19,7 +20,7 @@ from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.ui.compat import resolve_optional_uuid
 from pathtree.ui.widgets.history_input import HistoryInput
 from pathtree.ui.widgets.icon_picker import IconPicker
-from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
+from pathtree.ui.widgets.path_autocomplete import PathAutocomplete, PathAutocompleteMode
 
 
 class AddNodeDialog(ModalScreen[uuid.UUID | None]):
@@ -219,6 +220,16 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             icon_picker.set_node_type("resource", "directory")
         elif self.selected_type == "file":
             icon_picker.set_node_type("resource", "file")
+
+        # Update path autocomplete mode based on selection immediately
+        try:
+            path_autocomplete = self.query_one("#input-path-wrapper", PathAutocomplete)
+            if self.selected_type == "file":
+                path_autocomplete.set_mode(PathAutocompleteMode.FILE)
+            else:
+                path_autocomplete.set_mode(PathAutocompleteMode.DIRECTORY)
+        except NoMatches:
+            pass
 
         self.update_parent_choices()
 
