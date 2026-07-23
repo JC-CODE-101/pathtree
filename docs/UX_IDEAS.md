@@ -40,6 +40,17 @@ This document collects small UX improvements and quality-of-life ideas for PathT
 - One editor/runner may be selected as the default action used by `Enter`.
 - The context menu may allow choosing a different configured editor/runner for a single action without changing the default.
 
+## Open Containing Folder
+- Provide a generic cross-platform action named `open_containing_folder`.
+- Directory resources may open directly in the system file manager in addition to changing the current shell directory.
+- File, Script and Executable resources may open their parent directory instead of opening or running the resource itself.
+- Reveal/select the resource in the file manager when the platform supports it.
+- Linux: use the default file manager via `xdg-open <directory>`.
+- Windows: open the directory with Explorer and support revealing a file with `explorer /select,<file>` where appropriate.
+- macOS: use `open <directory>` and `open -R <file>` for reveal behavior.
+- Keep the implementation provider-driven through the existing Resource Action Framework.
+- Do not add resource-specific branching to `MainScreen`.
+
 ## Context-sensitive Status Bar
 - Show only shortcuts valid for the currently selected node and active UI mode.
 - Display different shortcuts for Workspace, Folder and Resource nodes.
