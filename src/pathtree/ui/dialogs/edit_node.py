@@ -166,14 +166,9 @@ class EditNodeDialog(ModalScreen[bool]):
                 )
 
             # Resolve current icon or default fallback if None
-            from pathtree.utils.icons import NodeIconCatalog
+            from pathtree.utils.icons import icon_registry
 
-            catalog = NodeIconCatalog()
-            current_icon = self.node.icon
-            if not current_icon:
-                current_icon = catalog.get_default_icon(
-                    self.node.node_kind, self.node.resource_type
-                )
+            current_icon = icon_registry.get_icon(self.node)
 
             with Vertical(classes="field-container"):
                 yield Label("Icon", classes="field-label")
