@@ -732,6 +732,18 @@ class NodeService:
                     )
 
             self.repository.delete_recursive(node_id)
+
+            # Compact pin positions after database cascade deletion
+            from pathtree.database.repository import PinRepository
+
+            pin_repo = PinRepository(self.repository.session)
+            pins = pin_repo.list_all()
+            for idx, pin in enumerate(pins):
+                expected_pos = idx + 1
+                if pin.position != expected_pos:
+                    pin.position = expected_pos
+                    pin_repo.update(pin)
+
         except RepositoryCycleError as e:
             raise CycleError(str(e)) from e
         except RepositoryIntegrityError as e:

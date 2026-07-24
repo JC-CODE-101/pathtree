@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from pathtree.database.errors import RepositoryError, RepositoryIntegrityError
 from pathtree.models.node import Node
+from pathtree.models.pin import Pin
 
 
 class RepositoryCycleError(Exception):
@@ -173,6 +174,14 @@ class NodeRepository:
         """
         descendants = self.get_descendants(node_id)
         try:
+            # Delete associated pins first to prevent FOREIGN KEY constraint failures
+            from sqlmodel import delete
+
+            node_ids_to_delete = [node_id] + [d.id for d in descendants]
+            pin_del_stmt = delete(Pin).where(Pin.node_id.in_(node_ids_to_delete))
+            self.session.exec(pin_del_stmt)
+            self.session.flush()
+
             for desc in reversed(descendants):
                 self.session.delete(desc)
                 self.session.flush()
@@ -210,3 +219,94 @@ class NodeRepository:
             if sib.name.strip().casefold() == normalized_target:
                 return True
         return False
+
+
+class PinRepository:
+    """Repository for managing Pin persistence.
+
+    Handles CRUD operations and queries on the pins table.
+    """
+
+    def __init__(self, session: Session) -> None:
+        """Initialize the repository with a database session."""
+        self.session = session
+
+    def create(self, pin: Pin) -> Pin:
+        """Create a new Pin in the database."""
+        try:
+            self.session.add(pin)
+            self.session.commit()
+            self.session.refresh(pin)
+            return pin
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
+
+    def get_by_id(self, id: uuid.UUID) -> Pin | None:
+        """Retrieve a Pin by its UUID."""
+        return self.session.get(Pin, id)
+
+    def get_by_node_id(self, node_id: uuid.UUID) -> Pin | None:
+        """Retrieve a Pin by Node UUID."""
+        statement = select(Pin).where(Pin.node_id == node_id)
+        return self.session.exec(statement).first()
+
+    def list_all(self) -> Sequence[Pin]:
+        """Retrieve all Pin records sorted by position."""
+        statement = select(Pin).order_by(Pin.position)
+        return self.session.exec(statement).all()
+
+    def update(self, pin: Pin) -> Pin:
+        """Update an existing Pin in the database."""
+        from datetime import UTC, datetime
+
+        pin.updated_at = datetime.now(UTC)
+        try:
+            self.session.add(pin)
+            self.session.commit()
+            self.session.refresh(pin)
+            return pin
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
+
+    def delete(self, id: uuid.UUID) -> bool:
+        """Delete a Pin by its UUID."""
+        pin = self.get_by_id(id)
+        if pin:
+            try:
+                self.session.delete(pin)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
+        return False
+
+    def delete_by_node_id(self, node_id: uuid.UUID) -> bool:
+        """Delete a Pin associated with a Node UUID."""
+        pin = self.get_by_node_id(node_id)
+        if pin:
+            return self.delete(pin.id)
+        return False
+
+    def get_max_position(self) -> int:
+        """Get the current maximum position among all pins, or 0 if empty."""
+        statement = select(Pin).order_by(Pin.position.desc())
+        pin = self.session.exec(statement).first()
+        return pin.position if pin else 0
