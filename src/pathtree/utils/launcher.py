@@ -342,43 +342,45 @@ class PlatformLauncher:
 
         else:
             # Linux and other Unix-like OSes
-            # Sequentially check: wl-copy, xclip, xsel
-            if shutil.which("wl-copy"):
-                try:
-                    subprocess.run(
-                        ["wl-copy"], input=text, text=True, check=True, shell=False
-                    )
-                    return
-                except (OSError, subprocess.SubprocessError):
-                    pass
+            # Select candidates based on session type
+            session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+            if session_type == "wayland":
+                candidates = ["wl-copy", "xclip", "xsel"]
+            elif session_type == "x11":
+                candidates = ["xclip", "xsel"]
+            else:
+                candidates = ["wl-copy", "xclip", "xsel"]
 
-            if shutil.which("xclip"):
-                try:
-                    subprocess.run(
-                        ["xclip", "-selection", "clipboard"],
-                        input=text,
-                        text=True,
-                        check=True,
-                        shell=False,
-                    )
-                    return
-                except (OSError, subprocess.SubprocessError):
-                    pass
+            # Map tools to argv
+            tool_args = {
+                "wl-copy": ["wl-copy"],
+                "xclip": ["xclip", "-selection", "clipboard"],
+                "xsel": ["xsel", "--clipboard", "--input"],
+            }
 
-            if shutil.which("xsel"):
-                try:
-                    subprocess.run(
-                        ["xsel", "--clipboard", "--input"],
-                        input=text,
-                        text=True,
-                        check=True,
-                        shell=False,
-                    )
-                    return
-                except (OSError, subprocess.SubprocessError):
-                    pass
+            installed_backends = []
+            backend_errors = []
 
+            for tool in candidates:
+                if shutil.which(tool):
+                    installed_backends.append(tool)
+                    args = tool_args[tool]
+                    try:
+                        subprocess.run(
+                            args, input=text, text=True, check=True, shell=False
+                        )
+                        return
+                    except (OSError, subprocess.SubprocessError) as e:
+                        backend_errors.append(f"{tool} failed: {e}")
+
+            if not installed_backends:
+                raise LaunchError(
+                    "No supported clipboard mechanism is available on this system. "
+                    "Please install wl-clipboard, xclip, or xsel."
+                )
+
+            # All installed backends failed
+            errors_str = "; ".join(backend_errors)
             raise LaunchError(
-                "No supported clipboard mechanism is available on this system. "
-                "Please install wl-clipboard, xclip, or xsel."
+                f"All available clipboard backends failed to copy: {errors_str}"
             )

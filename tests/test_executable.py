@@ -1,4 +1,5 @@
 import os
+import subprocess
 import sys
 import uuid
 from unittest.mock import MagicMock, patch
@@ -346,6 +347,119 @@ def test_platform_launcher_copy_to_clipboard_linux_no_backend(mock_which):
     with pytest.raises(LaunchError) as exc:
         PlatformLauncher.copy_to_clipboard("test text")
     assert "No supported clipboard mechanism is available" in str(exc.value)
+
+
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("sys.platform", "linux")
+@patch.dict(os.environ, {"XDG_SESSION_TYPE": "x11"}, clear=True)
+def test_platform_launcher_copy_to_clipboard_linux_x11(mock_which, mock_run):
+    """Verify copy_to_clipboard on X11 prefers xclip and bypasses wl-copy."""
+    mock_which.side_effect = lambda cmd: (
+        f"/usr/bin/{cmd}" if cmd in ("wl-copy", "xclip", "xsel") else None
+    )
+
+    PlatformLauncher.copy_to_clipboard("x11 text")
+
+    mock_run.assert_called_once_with(
+        ["xclip", "-selection", "clipboard"],
+        input="x11 text",
+        text=True,
+        check=True,
+        shell=False,
+    )
+
+
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("sys.platform", "linux")
+@patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland"}, clear=True)
+def test_platform_launcher_copy_to_clipboard_linux_wayland(mock_which, mock_run):
+    """Verify copy_to_clipboard on Wayland prefers wl-copy."""
+    mock_which.side_effect = lambda cmd: (
+        f"/usr/bin/{cmd}" if cmd in ("wl-copy", "xclip") else None
+    )
+
+    PlatformLauncher.copy_to_clipboard("wayland text")
+
+    mock_run.assert_called_once_with(
+        ["wl-copy"], input="wayland text", text=True, check=True, shell=False
+    )
+
+
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("sys.platform", "linux")
+@patch.dict(os.environ, {}, clear=True)
+def test_platform_launcher_copy_to_clipboard_linux_unknown_session(
+    mock_which, mock_run
+):
+    """Verify unknown session type probes all backends safely."""
+    mock_which.side_effect = lambda cmd: "/usr/bin/xsel" if cmd == "xsel" else None
+
+    PlatformLauncher.copy_to_clipboard("unknown text")
+
+    mock_run.assert_called_once_with(
+        ["xsel", "--clipboard", "--input"],
+        input="unknown text",
+        text=True,
+        check=True,
+        shell=False,
+    )
+
+
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("sys.platform", "linux")
+@patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland"}, clear=True)
+def test_platform_launcher_copy_to_clipboard_linux_fallback_success(
+    mock_which, mock_run
+):
+    """Verify preferred backend failure falls back to subsequent backend."""
+    mock_which.side_effect = lambda cmd: (
+        f"/usr/bin/{cmd}" if cmd in ("wl-copy", "xclip") else None
+    )
+
+    def mock_run_side_effect(args, **kwargs):
+        if args[0] == "wl-copy":
+            raise subprocess.SubprocessError("wl-copy failed")
+        return MagicMock()
+
+    mock_run.side_effect = mock_run_side_effect
+
+    PlatformLauncher.copy_to_clipboard("fallback text")
+
+    assert mock_run.call_count == 2
+    mock_run.assert_any_call(
+        ["wl-copy"], input="fallback text", text=True, check=True, shell=False
+    )
+    mock_run.assert_any_call(
+        ["xclip", "-selection", "clipboard"],
+        input="fallback text",
+        text=True,
+        check=True,
+        shell=False,
+    )
+
+
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("sys.platform", "linux")
+@patch.dict(os.environ, {"XDG_SESSION_TYPE": "wayland"}, clear=True)
+def test_platform_launcher_copy_to_clipboard_linux_all_failed(mock_which, mock_run):
+    """Verify that if all backends fail, a detailed LaunchError is reported."""
+    from pathtree.utils.launcher import LaunchError
+
+    mock_which.side_effect = lambda cmd: (
+        f"/usr/bin/{cmd}" if cmd in ("wl-copy", "xclip") else None
+    )
+    mock_run.side_effect = subprocess.SubprocessError("cannot connect to display")
+
+    with pytest.raises(LaunchError) as exc:
+        PlatformLauncher.copy_to_clipboard("failed text")
+    assert "All available clipboard backends failed to copy" in str(exc.value)
+    assert "wl-copy failed" in str(exc.value)
+    assert "xclip failed" in str(exc.value)
 
 
 @patch("pathtree.utils.launcher.PlatformLauncher.copy_to_clipboard")
