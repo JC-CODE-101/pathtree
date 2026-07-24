@@ -181,18 +181,25 @@ class IconRegistry:
     Supports icon lookup by resource type, file extension, and custom overrides.
     Implements deterministic fallback resolution:
         file extension icon -> resource type icon -> generic default icon
+
+    Nerd Font Support:
+    - Default behavior (PATHTREE_NERD_FONTS unset): Safe Unicode icons (False)
+    - Disabled (PATHTREE_NERD_FONTS=false): Safe Unicode icons (False)
+    - Enabled (PATHTREE_NERD_FONTS=true): Nerd Font icons (True)
+
+    Future Extensions:
+    - This registry is designed to support custom icon themes, overrides,
+      and plugin-provided icons as future expansions without breaking the public API.
     """
 
     def __init__(self) -> None:
         """Initialize IconRegistry with default mappings and support settings."""
         self.nerd_fonts_enabled = os.environ.get(
-            "PATHTREE_NERD_FONTS", "true"
+            "PATHTREE_NERD_FONTS", "false"
         ).lower() in ("1", "true", "yes", "on")
         self._extension_icons: dict[str, dict[str, str]] = {}
         self._resource_icons: dict[str, dict[str, str]] = {}
         self._generic_default = {"nerd": "󰈔", "safe": "▪"}
-        self._themes: dict[str, dict] = {}
-        self._active_theme: str | None = None
 
         self._initialize_defaults()
 
@@ -243,18 +250,6 @@ class IconRegistry:
             "nerd": nerd_icon,
             "safe": safe_icon,
         }
-
-    def register_theme(self, theme_name: str, theme_data: dict) -> None:
-        """Register a custom icon theme."""
-        self._themes[theme_name] = theme_data
-
-    def set_active_theme(self, theme_name: str | None) -> None:
-        """Set the active theme, or clear it to use defaults."""
-        if theme_name is None:
-            self._active_theme = None
-            return
-        if theme_name in self._themes:
-            self._active_theme = theme_name
 
     def get_icon(self, node) -> str:
         """Resolve the icon for a given node based on deterministic order.

@@ -101,7 +101,7 @@ def test_icon_registry_custom_icons_preservation() -> None:
 
 
 def test_icon_registry_future_compatibility() -> None:
-    """Test that the registry supports overrides, themes and dynamic registration."""
+    """Test that the registry supports overrides and dynamic registration."""
     registry = IconRegistry()
     registry.nerd_fonts_enabled = True
 
@@ -123,3 +123,42 @@ def test_icon_registry_future_compatibility() -> None:
 
     registry.nerd_fonts_enabled = False
     assert registry.get_icon(node_ext) == "▲"
+
+
+def test_environment_variable_parsing(monkeypatch) -> None:
+    """Test environment variable parsing deterministic behavior."""
+    # 1. Unset environment variable: should default to False (safe Unicode icons)
+    monkeypatch.delenv("PATHTREE_NERD_FONTS", raising=False)
+    registry_unset = IconRegistry()
+    assert registry_unset.nerd_fonts_enabled is False
+
+    # 2. PATHTREE_NERD_FONTS=false: should resolve to False
+    monkeypatch.setenv("PATHTREE_NERD_FONTS", "false")
+    registry_false = IconRegistry()
+    assert registry_false.nerd_fonts_enabled is False
+
+    # 3. PATHTREE_NERD_FONTS=true: should resolve to True
+    monkeypatch.setenv("PATHTREE_NERD_FONTS", "true")
+    registry_true = IconRegistry()
+    assert registry_true.nerd_fonts_enabled is True
+
+    # 4. Truthy values: 1, yes, on, True
+    for val in ("1", "yes", "on", "True"):
+        monkeypatch.setenv("PATHTREE_NERD_FONTS", val)
+        reg = IconRegistry()
+        assert reg.nerd_fonts_enabled is True
+
+    # 5. Falsy/other values
+    for val in ("0", "no", "off", "anything_else"):
+        monkeypatch.setenv("PATHTREE_NERD_FONTS", val)
+        reg = IconRegistry()
+        assert reg.nerd_fonts_enabled is False
+
+
+def test_theme_api_is_absent() -> None:
+    """Test that the theme API is absent to prevent a non-functional public API."""
+    registry = IconRegistry()
+    assert not hasattr(registry, "register_theme")
+    assert not hasattr(registry, "set_active_theme")
+    assert not hasattr(registry, "_themes")
+    assert not hasattr(registry, "_active_theme")
