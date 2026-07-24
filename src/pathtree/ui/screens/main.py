@@ -87,6 +87,11 @@ class MainScreen(Screen[None]):
         self.action_registry.register(
             "resource", "script", ScriptActionProvider(self.node_service)
         )
+        from pathtree.actions.executable import ExecutableActionProvider
+
+        self.action_registry.register(
+            "resource", "executable", ExecutableActionProvider(self.node_service)
+        )
 
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""

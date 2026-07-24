@@ -135,19 +135,26 @@ class EditNodeDialog(ModalScreen[bool]):
                     id="input-name",
                 )
 
-            # Show path for directory, file and script resources
+            # Show path for directory, file, script and executable resources
             is_resource_with_path = (
                 self.node.node_kind == "resource"
-                and self.node.resource_type in ("directory", "file", "script")
+                and self.node.resource_type
+                in ("directory", "file", "script", "executable")
             )
             with Vertical(classes="field-container", id="path-field-container") as vc:
                 yield Label("Path", classes="field-label")
-                initial_mode = (
-                    PathAutocompleteMode.FILE
-                    if self.node.node_kind == "resource"
-                    and self.node.resource_type in ("file", "script")
-                    else PathAutocompleteMode.DIRECTORY
-                )
+                if (
+                    self.node.node_kind == "resource"
+                    and self.node.resource_type == "executable"
+                ):
+                    initial_mode = PathAutocompleteMode.EXECUTABLE
+                elif self.node.node_kind == "resource" and self.node.resource_type in (
+                    "file",
+                    "script",
+                ):
+                    initial_mode = PathAutocompleteMode.FILE
+                else:
+                    initial_mode = PathAutocompleteMode.DIRECTORY
                 yield PathAutocomplete(
                     value=self.node.path or "",
                     placeholder="Enter path...",
@@ -214,7 +221,7 @@ class EditNodeDialog(ModalScreen[bool]):
     def on_input_changed(self, event: Input.Changed) -> None:
         is_resource_with_path = (
             self.node.node_kind == "resource"
-            and self.node.resource_type in ("directory", "file", "script")
+            and self.node.resource_type in ("directory", "file", "script", "executable")
         )
         if event.input.id == "input-path" and is_resource_with_path:
             path_val = event.value.strip()
@@ -255,10 +262,10 @@ class EditNodeDialog(ModalScreen[bool]):
 
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
-        # Path is only saved/sent for Directory, File and Script resources
+        # Path is only saved/sent for Directory, File, Script, and Executable resources
         is_resource_with_path = (
             self.node.node_kind == "resource"
-            and self.node.resource_type in ("directory", "file", "script")
+            and self.node.resource_type in ("directory", "file", "script", "executable")
         )
         path = None
         if is_resource_with_path:

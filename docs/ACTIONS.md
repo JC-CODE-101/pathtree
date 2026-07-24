@@ -301,10 +301,34 @@ The following features are intentionally deferred from this MVP:
 - Terminal-attached execution (interactive prompts)
 - Long-running process management (stop/restart controls)
 
+## Concrete Resource Types: Executable Resource Support
+
+PathTree supports registering and securely launching native compiled executable binaries on POSIX and Windows systems.
+
+### Available Actions
+1. **`launch` (Default)**
+   - Launches the executable safely in the background.
+   - Re-validates the executable's path, existence, and launchability on activation.
+   - Starts the process using standard sequential `argv` lists (where `argv = [resolved_path]`) to prevent shell injection vulnerabilities.
+   - Working directory defaults to the executable's parent directory (`cwd = path_obj.parent`).
+
+2. **`open_containing_folder`**
+   - Opens the directory containing the executable using the platform's default application launcher.
+
+3. **`copy_path`**
+   - Copies the absolute executable path and prints it in the details panel using `ResourceActionResultTarget.DETAILS`.
+
+4. **`view_details`**
+   - Displays structured metadata about the executable including Name, Path, File Size, Extension, and Description if present, presented in the details panel using `ResourceActionResultTarget.DETAILS`.
+
+### Security Guarantees
+- **Prohibition of `shell=True`**: All subprocess invocations completely avoid `shell=True`. No raw shell string or command-line concatenation is allowed.
+- **Secure Launcher Abstraction**: Uses `PlatformLauncher.launch_process` to initiate executables cleanly as background processes.
+- **First Version Limitations**: The executable is currently launched without user-defined arguments. Custom argument profiles are deferred and will be implemented in a subsequent phase.
+
 ## Future Resource Types
 - The architecture is designed to accommodate additional resource types such as:
   - `url` / `open_url`
-  - `executable` / `run`
   - `ssh` / `command`
 
 ## Safety Rules for Command Execution

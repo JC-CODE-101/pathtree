@@ -2481,12 +2481,22 @@ async def test_add_node_dialog_vim_navigation(session: Session) -> None:
         await pilot.pause(0.01)
         assert dialog.selected_type == "script"
 
-        # Test wrapping with 'j' moves Script -> Workspace
+        # Test 'j' moves Script -> Executable
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "executable"
+
+        # Test wrapping with 'j' moves Executable -> Workspace
         await pilot.press("j")
         await pilot.pause(0.01)
         assert dialog.selected_type == "workspace"
 
-        # Test 'k' moves Workspace -> Script (wrapping)
+        # Test 'k' moves Workspace -> Executable (wrapping)
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "executable"
+
+        # Test 'k' moves Executable -> Script
         await pilot.press("k")
         await pilot.pause(0.01)
         assert dialog.selected_type == "script"
