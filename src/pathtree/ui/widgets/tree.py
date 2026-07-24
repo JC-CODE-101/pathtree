@@ -3,11 +3,16 @@
 import uuid
 from typing import ClassVar
 
+from rich.style import Style
 from rich.text import Text
 from textual import events
+from textual._loop import loop_last
 from textual.binding import Binding
+from textual.geometry import Size
 from textual.message import Message
+from textual.strip import Strip
 from textual.widgets import Tree
+from textual.widgets._tree import _TreeLine
 from textual.widgets.tree import TreeNode as TextualTreeNode
 
 from pathtree.services.node_service import NodeService, NodeServiceError, TreeNode
@@ -93,13 +98,129 @@ class NodeTreeView(Tree[uuid.UUID]):
 
         """Sent when the search focus key is pressed in the tree."""
 
-    def __init__(self, node_service: NodeService, **kwargs) -> None:
+    def __init__(
+        self, node_service: NodeService, spacing_mode: str = "normal", **kwargs
+    ) -> None:
         """Initialize the NodeTreeView with a NodeService."""
+        self._spacing_mode = spacing_mode
         super().__init__("Root", **kwargs)
         self.node_service = node_service
         self.show_root = False
         self.load_error: str | None = None
         self.populate_tree()
+
+    @property
+    def spacing_mode(self) -> str:
+        """Get the current visual spacing mode between Workspace root nodes."""
+        return self._spacing_mode
+
+    @spacing_mode.setter
+    def spacing_mode(self, mode: str) -> None:
+        """Set the visual spacing mode and rebuild the tree."""
+        if mode not in ("compact", "normal", "wide"):
+            raise ValueError("spacing_mode must be 'compact', 'normal', or 'wide'")
+        self._spacing_mode = mode
+        self.populate_tree()
+
+    def _build(self) -> None:
+        """Builds tree lines, inserting spacers between top-level Workspace nodes."""
+        lines = []
+        add_line = lines.append
+        root = self.root
+
+        # Determine number of spacer lines
+        num_spacers = 0
+        if self._spacing_mode == "normal":
+            num_spacers = 1
+        elif self._spacing_mode == "wide":
+            num_spacers = 2
+
+        def add_node(path: list, node, last: bool) -> None:
+            child_path = [*path, node]
+            node._line = len(lines)
+            add_line(_TreeLine(child_path, last))
+            if node._expanded:
+                for last_child, child in loop_last(node._children):
+                    add_node(child_path, child, last_child)
+
+        if self.show_root:
+            add_node([], root, True)
+        else:
+            # Add top-level Workspace nodes with spacing
+            for idx, node in enumerate(self.root._children):
+                if idx > 0 and num_spacers > 0:
+                    for _ in range(num_spacers):
+                        spacer = _TreeLine([node], True)
+                        spacer.is_spacer = True
+                        add_line(spacer)
+                add_node([], node, True)
+
+        self._tree_lines_cached = lines
+
+        guide_depth = self.guide_depth
+        show_root = self.show_root
+        get_label_width = self.get_label_width
+
+        def get_line_width(line) -> int:
+            if getattr(line, "is_spacer", False):
+                return 0
+            return get_label_width(line.node) + line._get_guide_width(
+                guide_depth, show_root
+            )
+
+        if lines:
+            width = max([get_line_width(line) for line in lines])
+        else:
+            width = self.size.width
+
+        self.virtual_size = Size(width, len(lines))
+        if self.cursor_line != -1:
+            if self.cursor_node is not None:
+                self.cursor_line = self.cursor_node._line
+            if self.cursor_line >= len(lines):
+                self.cursor_line = -1
+
+    def _render_line(self, y: int, x1: int, x2: int, base_style: Style) -> Strip:
+        """Render a tree line. If it is a spacer, render a blank strip."""
+        tree_lines = self._tree_lines
+        if y < len(tree_lines):
+            line = tree_lines[y]
+            if getattr(line, "is_spacer", False):
+                return Strip.blank(self.size.width, base_style)
+        return super()._render_line(y, x1, x2, base_style)
+
+    def validate_cursor_line(self, value: int) -> int:
+        """Prevent cursor line from landing on a spacer line, skipping over them."""
+        tree_lines = self._tree_lines
+        if not tree_lines:
+            return -1
+        max_idx = len(tree_lines) - 1
+        value = max(0, min(value, max_idx))
+
+        current = self.cursor_line
+        if getattr(tree_lines[value], "is_spacer", False):
+            if current == -1:
+                for idx in range(value, len(tree_lines)):
+                    if not getattr(tree_lines[idx], "is_spacer", False):
+                        return idx
+                return value
+
+            # Skip in the direction of movement
+            direction = 1 if value >= current else -1
+            idx = value
+            while 0 <= idx < len(tree_lines):
+                if not getattr(tree_lines[idx], "is_spacer", False):
+                    return idx
+                idx += direction
+
+            # Fallback to opposite search
+            idx = value
+            while 0 <= idx < len(tree_lines):
+                if not getattr(tree_lines[idx], "is_spacer", False):
+                    return idx
+                idx -= direction
+
+        return value
 
     def get_expanded_node_ids(self) -> set[uuid.UUID]:
         """Capture the IDs of expanded visible nodes recursively using UUIDs.
@@ -377,6 +498,14 @@ class NodeTreeView(Tree[uuid.UUID]):
         meta = event.style.meta
         if "line" in meta:
             cursor_line = meta["line"]
+            tree_lines = self._tree_lines
+            if cursor_line < len(tree_lines) and getattr(
+                tree_lines[cursor_line], "is_spacer", False
+            ):
+                event.prevent_default()
+                event.stop()
+                return
+
             if meta.get("toggle", False):
                 await super()._on_click(event)
                 return
