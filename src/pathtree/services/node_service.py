@@ -241,19 +241,16 @@ class NodeService:
 
     def validate_executable_path(self, path_obj: Path) -> None:
         """Validate if the path is launchable on the current platform."""
-        import os
         import sys
 
-        if sys.platform == "win32":
-            # Support normal executable file types such as .exe and .com
-            ext = path_obj.suffix.lower()
-            if ext not in (".exe", ".com"):
+        from pathtree.utils.path import is_launchable_file
+
+        if not is_launchable_file(path_obj):
+            if sys.platform == "win32":
                 raise ValidationError(
                     f"Executable path '{path_obj}' is not a valid Windows executable."
                 )
-        else:
-            # On POSIX systems: accept files with executable permission
-            if not os.access(path_obj, os.X_OK):
+            else:
                 raise ValidationError(
                     f"Executable permission is missing on '{path_obj}'."
                 )

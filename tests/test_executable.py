@@ -439,27 +439,23 @@ def test_path_autocomplete_executable_mode(tmp_path):
     sub.mkdir()
 
     # Executable file
-    exe_file = d / "app"
+    exe_file = d / "app.exe"
     exe_file.touch()
-    os.chmod(exe_file, 0o755)
 
     # Non-executable file
     text_file = d / "notes.txt"
     text_file.touch()
-    os.chmod(text_file, 0o644)
 
-    # Extensionless non-executable file
+    # Extensionless file
     extless_file = d / "readme"
     extless_file.touch()
-    os.chmod(extless_file, 0o644)
 
     from pathtree.ui.widgets.path_autocomplete import PathAutocomplete
 
     # Initialize PathAutocomplete in EXECUTABLE mode
     autocomplete = PathAutocomplete(mode=PathAutocompleteMode.EXECUTABLE)
 
-    # Patch os.scandir internally to look at our created temp path
-    # We will test update_suggestions logic on different platforms
+    # Patch os.path internally to look at our created temp path
     with (
         patch("os.path.exists", return_value=True),
         patch("os.path.isdir", return_value=True),
@@ -479,15 +475,16 @@ def test_path_autocomplete_executable_mode(tmp_path):
 
         mock_entries = [
             MockEntry("subdir", True, False),
-            MockEntry("app", False, True),
+            MockEntry("app.exe", False, True),
+            MockEntry("app.com", False, True),
             MockEntry("notes.txt", False, True),
             MockEntry("readme", False, True),
         ]
 
         def mock_access(path, mode):
-            # mock X_OK access: only subdir (it's a directory) or app is executable
+            # mock X_OK access: only subdir or app.exe is executable on POSIX
             path_str = str(path)
-            return path_str.endswith("app") or "subdir" in path_str
+            return path_str.endswith("app.exe") or "subdir" in path_str
 
         with (
             patch("os.scandir") as mock_scandir,
@@ -508,14 +505,48 @@ def test_path_autocomplete_executable_mode(tmp_path):
             assert "subdir/" in options
 
             if sys.platform != "win32":
-                # On POSIX: only "app" (executable) is shown.
-                # Non-executables are filtered out.
-                assert "app" in options
+                # On POSIX: "app.exe" is shown based on execute permission.
+                # Extensionless is supported on POSIX if X_OK is mocked to return True.
+                assert "app.exe" in options
                 assert "notes.txt" not in options
                 assert "readme" not in options
             else:
-                # On Windows: extensionless is allowed,
-                # while other non-executables are filtered out.
-                assert "app" in options
-                assert "readme" in options
+                # On Windows: only .exe and .com are allowed.
+                # Extensionless is strictly excluded.
+                assert "app.exe" in options
+                assert "app.com" in options
                 assert "notes.txt" not in options
+                assert "readme" not in options
+
+
+def test_executable_autocomplete_validation_consistency(tmp_path):
+    """Test consistency between autocomplete rules and NodeService validation."""
+    from pathtree.utils.path import is_launchable_file
+
+    exe_file = tmp_path / "test.exe"
+    com_file = tmp_path / "test.com"
+    txt_file = tmp_path / "test.txt"
+    no_ext_file = tmp_path / "test_no_ext"
+
+    exe_file.touch()
+    com_file.touch()
+    txt_file.touch()
+    no_ext_file.touch()
+
+    if sys.platform == "win32":
+        assert is_launchable_file(exe_file) is True
+        assert is_launchable_file(com_file) is True
+        assert is_launchable_file(txt_file) is False
+        assert is_launchable_file(no_ext_file) is False
+    else:
+        # On POSIX, no execute permissions yet
+        assert is_launchable_file(exe_file) is False
+
+        # Grant execute permissions
+        os.chmod(exe_file, 0o755)
+        os.chmod(no_ext_file, 0o755)
+        assert is_launchable_file(exe_file) is True
+        assert (
+            is_launchable_file(no_ext_file) is True
+        )  # extensionless POSIX exec supported
+        assert is_launchable_file(txt_file) is False

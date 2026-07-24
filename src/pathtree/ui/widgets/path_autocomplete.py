@@ -416,16 +416,15 @@ class PathAutocomplete(Widget):
                                 if self._mode == PathAutocompleteMode.FILE:
                                     file_entries.append(entry.name)
                                 elif self._mode == PathAutocompleteMode.EXECUTABLE:
-                                    import sys
+                                    from pathlib import Path
 
-                                    entry_path = os.path.join(scandir_path, entry.name)
-                                    if sys.platform == "win32":
-                                        ext = os.path.splitext(entry.name)[1].lower()
-                                        if ext in (".exe", ".com", ""):
-                                            file_entries.append(entry.name)
-                                    else:
-                                        if os.access(entry_path, os.X_OK):
-                                            file_entries.append(entry.name)
+                                    from pathtree.utils.path import is_launchable_file
+
+                                    entry_path = Path(
+                                        os.path.join(scandir_path, entry.name)
+                                    )
+                                    if is_launchable_file(entry_path):
+                                        file_entries.append(entry.name)
                         except OSError:
                             # Safely ignore a single broken entry
                             pass
