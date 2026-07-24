@@ -130,3 +130,20 @@ async def test_workspace_spacing_mouse_click_ignored(session: Session) -> None:
 
         assert tree.cursor_line == 0
         assert tree.cursor_node.data == ws1.id
+
+
+def test_workspace_spacing_textual_compatibility(session: Session) -> None:
+    """Test that all private Textual tree members needed for spacing are available."""
+    node_service = NodeService(NodeRepository(session))
+
+    # 1. Verify we can import _TreeLine
+    from textual.widgets._tree import _TreeLine
+
+    assert _TreeLine is not None
+
+    # 2. Verify tree has required private methods and attributes
+    tree = NodeTreeView(node_service=node_service)
+    assert hasattr(tree, "_tree_lines_cached")
+    assert hasattr(tree, "_build")
+    assert hasattr(tree, "_render_line")
+    assert hasattr(tree, "_tree_lines")

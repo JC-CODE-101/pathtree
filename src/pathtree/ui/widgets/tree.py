@@ -123,7 +123,16 @@ class NodeTreeView(Tree[uuid.UUID]):
         self.populate_tree()
 
     def _build(self) -> None:
-        """Builds tree lines, inserting spacers between top-level Workspace nodes."""
+        """Builds tree lines, inserting spacers between top-level Workspace nodes.
+
+        MAINTENANCE NOTE:
+        This implementation of visual workspace spacing relies directly on Textual's
+        private tree internals (specifically: _tree_lines_cached, _TreeLine, and the
+        _build / _render_line lifecycle).
+        The supported Textual version must remain pinned in pyproject.toml. This
+        implementation must be thoroughly revalidated before any Textual upgrade
+        to prevent subtle rendering, selection, or navigation regressions.
+        """
         lines = []
         add_line = lines.append
         root = self.root
