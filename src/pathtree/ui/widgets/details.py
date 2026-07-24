@@ -30,12 +30,9 @@ class NodeDetailsPanel(Static):
         path = node.path if node.path else "N/A"
         description = node.description if node.description else "N/A"
 
-        from pathtree.utils.icons import NodeIconCatalog
+        from pathtree.utils.icons import icon_registry
 
-        catalog = NodeIconCatalog()
-        icon = node.icon
-        if not icon:
-            icon = catalog.get_default_icon(node.node_kind, node.resource_type)
+        icon = icon_registry.get_icon(node)
 
         content = (
             f"[bold]Name:[/bold] {name}\n"

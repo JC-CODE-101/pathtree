@@ -144,14 +144,9 @@ class NodeTreeView(Tree[uuid.UUID]):
                 should_expand = True
 
             # Resolve icon
-            from pathtree.utils.icons import NodeIconCatalog
+            from pathtree.utils.icons import icon_registry
 
-            catalog = NodeIconCatalog()
-            icon = db_node.icon
-            if not icon:
-                icon = catalog.get_default_icon(
-                    db_node.node_kind, db_node.resource_type
-                )
+            icon = icon_registry.get_icon(db_node)
 
             label = IconText(db_node.name, icon)
 
