@@ -68,7 +68,13 @@ class NodeTreeView(Tree[uuid.UUID]):
         Binding("o", "open_action_menu", "Open Action Menu", show=True),
         Binding("O", "open_action_menu", "Open Action Menu", show=False),
         Binding("shift+o", "open_action_menu", "Open Action Menu", show=False),
+        Binding("p", "open_pins_list", "Open Pins Screen", show=True),
+        Binding("P", "open_pins_list", "Open Pins Screen", show=False),
+        Binding("shift+p", "open_pins_list", "Open Pins Screen", show=False),
     ]
+
+    class OpenPinsList(Message):
+        """Sent when 'p' is pressed to open the Pins list screen."""
 
     class ActivateNode(Message):
         """Sent when a node is activated (via Enter or Double Click)."""
@@ -342,6 +348,10 @@ class NodeTreeView(Tree[uuid.UUID]):
     def action_open_action_menu(self) -> None:
         """Post OpenActionMenu message."""
         self.post_message(self.OpenActionMenu())
+
+    def action_open_pins_list(self) -> None:
+        """Post OpenPinsList message."""
+        self.post_message(self.OpenPinsList())
 
     def get_visible_nodes(self) -> list[TextualTreeNode[uuid.UUID]]:
         """Get all visible nodes in depth-first pre-order tree traversal."""

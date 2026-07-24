@@ -57,11 +57,12 @@ async def test_action_menu_opening_for_dir_res(
 
         # Check menu entries are correct
         menu_items = list(app.screen.query(ActionMenuItem))
-        assert len(menu_items) == 3
+        assert len(menu_items) == 4
         labels = [item.action.label for item in menu_items]
         assert "Change Directory" in labels
         assert "Copy Path" in labels
         assert "View Details" in labels
+        assert "Pin Node" in labels or "Unpin Node" in labels
 
         # Escape closes the menu
         await pilot.press("escape")
@@ -139,15 +140,17 @@ async def test_action_menu_nav_wrapping(session: Session, tmp_path: Path) -> Non
         await pilot.press("down")
         assert menu.highlighted_index == 2
         await pilot.press("ctrl+j")
+        assert menu.highlighted_index == 3
+        await pilot.press("j")
         assert menu.highlighted_index == 0  # Wraps to 0
 
         # Up/k/Ctrl+K goes to previous
         await pilot.press("k")
-        assert menu.highlighted_index == 2  # Wraps to last (2)
+        assert menu.highlighted_index == 3  # Wraps to last (3)
         await pilot.press("up")
-        assert menu.highlighted_index == 1
+        assert menu.highlighted_index == 2
         await pilot.press("ctrl+k")
-        assert menu.highlighted_index == 0
+        assert menu.highlighted_index == 1
 
         await pilot.press("escape")
 
@@ -227,8 +230,8 @@ async def test_action_menu_escape_closes(session: Session, tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_unsupported_nodes_do_not_open_menu(session: Session) -> None:
-    """Verify Workspace/Folder do not open the menu and show clear message."""
+async def test_all_nodes_can_open_menu_to_pin_unpin(session: Session) -> None:
+    """Verify Workspace/Folder can open the menu for Pinning/Unpinning."""
     repo = NodeRepository(session)
     ws = repo.create(Node(name="WS", node_kind="workspace"))
     repo.create(Node(name="Folder 1", node_kind="folder", parent_id=ws.id))
@@ -239,14 +242,16 @@ async def test_unsupported_nodes_do_not_open_menu(session: Session) -> None:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
 
-        details = app.screen.query_one("#details-panel")
-
         # 1. Workspace selected (WS)
         await pilot.press("O")
         await pilot.pause(0.05)
-        assert app.screen.id == "main-screen"  # Menu not opened
-        msg = "Action Menu is not available for Workspace nodes"
-        assert msg in details.render().plain
+        assert isinstance(app.screen, ResourceActionMenu)
+        menu_items = list(app.screen.query(ActionMenuItem))
+        assert len(menu_items) == 1
+        assert menu_items[0].action.id == "pin_node"
+
+        await pilot.press("escape")
+        await pilot.pause(0.05)
 
         # 2. Folder selected
         await pilot.press("l")
@@ -254,9 +259,10 @@ async def test_unsupported_nodes_do_not_open_menu(session: Session) -> None:
         await pilot.pause(0.05)
         await pilot.press("O")
         await pilot.pause(0.05)
-        assert app.screen.id == "main-screen"  # Menu not opened
-        msg_folder = "Action Menu is not available for Folder nodes"
-        assert msg_folder in details.render().plain
+        assert isinstance(app.screen, ResourceActionMenu)
+        menu_items = list(app.screen.query(ActionMenuItem))
+        assert len(menu_items) == 1
+        assert menu_items[0].action.id == "pin_node"
 
 
 @pytest.mark.asyncio

@@ -72,6 +72,19 @@ class MainScreen(Screen[None]):
         self._db_is_empty: bool = False
         self._current_tree_state: TreeState = TreeState()
 
+        # Initialize Pin Service
+        if (
+            hasattr(self.node_service, "repository")
+            and self.node_service.repository is not None
+        ):
+            from pathtree.database.repository import PinRepository
+            from pathtree.services.pin_service import PinService
+
+            pin_repo = PinRepository(self.node_service.repository.session)
+            self.pin_service = PinService(self.node_service.repository, pin_repo)
+        else:
+            self.pin_service = None
+
         # Initialize Action Registry and Register Providers
         self.action_registry = ResourceActionRegistry()
         self.action_registry.register(
@@ -274,39 +287,80 @@ class MainScreen(Screen[None]):
             details_panel.update_error("Node not found.")
             return
 
-        # 1. Selected node must be a Resource
-        if node.node_kind != "resource":
-            details_panel.update_error(
-                f"Action Menu is not available for {node.node_kind.capitalize()} nodes."
+        actions = []
+        provider = None
+        context = None
+
+        # Resolve provider-specific actions for Resource nodes
+        if node.node_kind == "resource":
+            provider = self.action_registry.get_provider(
+                node.node_kind, node.resource_type
             )
-            return
+            if provider:
+                context = ResourceActionContext(
+                    node=node,
+                    output_path=self.output_path,
+                )
+                actions.extend(provider.get_available_actions(context))
 
-        # 2. Registry must resolve a provider
-        provider = self.action_registry.get_provider(node.node_kind, node.resource_type)
-        if not provider:
-            res_type = node.resource_type or "None"
-            msg = f"No action provider found for resource type '{res_type}'."
-            details_panel.update_error(msg)
-            return
+        # Dynamically append dynamic Pin/Unpin actions based on current pin state
+        from pathtree.actions.base import ResourceAction
 
-        # 3. Provider must return at least one available action
-        context = ResourceActionContext(
-            node=node,
-            output_path=self.output_path,
-        )
-        actions = provider.get_available_actions(context)
-        if not actions:
-            details_panel.update_error("No available actions for this resource.")
-            return
+        if self.pin_service:
+            is_pinned = self.pin_service.is_pinned(node.id)
+            if is_pinned:
+                actions.append(
+                    ResourceAction(
+                        id="unpin_node",
+                        label="Unpin Node",
+                        description="Remove this node from global pins",
+                    )
+                )
+            else:
+                actions.append(
+                    ResourceAction(
+                        id="pin_node",
+                        label="Pin Node",
+                        description="Pin this node globally for fast access",
+                    )
+                )
 
         def handle_action_menu_finished(result: ActionMenuResult | None) -> None:
             tree.focus()
             if result is not None and result.action_id is not None:
-                self.execute_action(result.action_id, provider, context)
+                if result.action_id == "pin_node":
+                    self.pin_service.pin_node(node.id)
+                    self.app.notify(f'Pinned "{node.name}" globally')
+                    self.call_after_refresh(self._update_details_and_selection)
+                elif result.action_id == "unpin_node":
+                    self.pin_service.unpin_node(node.id)
+                    self.app.notify(f'Unpinned "{node.name}"')
+                    self.call_after_refresh(self._update_details_and_selection)
+                else:
+                    if provider and context:
+                        self.execute_action(result.action_id, provider, context)
 
         self.app.push_screen(
             ResourceActionMenu(actions, title=f"Actions for {node.name}"),
             callback=handle_action_menu_finished,
+        )
+
+    def on_node_tree_view_open_pins_list(
+        self, event: NodeTreeView.OpenPinsList
+    ) -> None:
+        """Handle 'p' key in tree to open the Pins screen."""
+        from pathtree.ui.screens.pins import PinsScreen
+
+        def handle_pins_screen_finished(selected_node_id: uuid.UUID | None) -> None:
+            if selected_node_id is not None:
+                # User selected/activated a pin, navigate to and select it in the tree
+                self.refresh_tree(selected_node_id=selected_node_id)
+            tree = self.query_one("#tree-view", NodeTreeView)
+            tree.focus()
+
+        self.app.push_screen(
+            PinsScreen(self.node_service, self.pin_service),
+            callback=handle_pins_screen_finished,
         )
 
     def execute_action(
