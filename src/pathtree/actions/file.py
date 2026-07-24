@@ -46,7 +46,7 @@ class FileActionProvider(ResourceActionProvider):
             ResourceAction(
                 id="copy_path",
                 label="Copy Path",
-                description="Copy file path to details panel",
+                description="Copy file path to clipboard",
             ),
             ResourceAction(
                 id="view_details",
@@ -138,13 +138,20 @@ class FileActionProvider(ResourceActionProvider):
                 )
 
         elif action_id == "copy_path":
-            return ResourceActionResult(
-                success=True,
-                exit_app=False,
-                output_value=f"Path: {resolved_path}",
-                message=f"Copied path: {resolved_path}",
-                target=ResourceActionResultTarget.DETAILS,
-            )
+            try:
+                PlatformLauncher.copy_to_clipboard(resolved_path)
+                return ResourceActionResult(
+                    success=True,
+                    exit_app=False,
+                    output_value=f"Path: {resolved_path}",
+                    message=f"Copied path to clipboard: {resolved_path}",
+                    target=ResourceActionResultTarget.DETAILS,
+                )
+            except Exception as e:
+                return ResourceActionResult(
+                    success=False,
+                    error_message=f"Clipboard error: {e}",
+                )
 
         elif action_id == "view_details":
             try:

@@ -25,6 +25,7 @@ from pathtree.ui.dialogs.add_node import AddNodeDialog
 from pathtree.ui.dialogs.edit_node import EditNodeDialog
 from pathtree.ui.widgets.path_autocomplete import PathAutocompleteMode
 from pathtree.utils.icons import NodeIconCatalog
+from pathtree.utils.launcher import PlatformLauncher
 
 # ==================== SERVICE & HIERARCHY TESTS ====================
 
@@ -308,8 +309,74 @@ def test_executable_open_containing_folder(mock_open_path, tmp_path):
     mock_open_path.assert_called_once_with(str(my_app.parent.absolute()))
 
 
-def test_executable_copy_path():
-    """Verify Copy Path copies the correct path to details."""
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("sys.platform", "darwin")
+def test_platform_launcher_copy_to_clipboard_macos(mock_which, mock_run):
+    """Verify copy_to_clipboard on macOS uses pbcopy securely without shell."""
+    mock_which.return_value = "/usr/bin/pbcopy"
+    PlatformLauncher.copy_to_clipboard("test text")
+
+    mock_run.assert_called_once_with(
+        ["pbcopy"], input="test text", text=True, check=True, shell=False
+    )
+
+
+@patch("subprocess.run")
+@patch("shutil.which")
+@patch("sys.platform", "linux")
+def test_platform_launcher_copy_to_clipboard_linux_wl_copy(mock_which, mock_run):
+    """Verify copy_to_clipboard on Linux uses wl-copy when available."""
+    mock_which.side_effect = lambda cmd: (
+        "/usr/bin/wl-copy" if cmd == "wl-copy" else None
+    )
+    PlatformLauncher.copy_to_clipboard("test text")
+
+    mock_run.assert_called_once_with(
+        ["wl-copy"], input="test text", text=True, check=True, shell=False
+    )
+
+
+@patch("shutil.which", return_value=None)
+@patch("sys.platform", "linux")
+def test_platform_launcher_copy_to_clipboard_linux_no_backend(mock_which):
+    """Verify copy_to_clipboard on Linux raises LaunchError if no backends exist."""
+    from pathtree.utils.launcher import LaunchError
+
+    with pytest.raises(LaunchError) as exc:
+        PlatformLauncher.copy_to_clipboard("test text")
+    assert "No supported clipboard mechanism is available" in str(exc.value)
+
+
+@patch("pathtree.utils.launcher.PlatformLauncher.copy_to_clipboard")
+def test_executable_copy_path_success(mock_copy, tmp_path):
+    """Verify Copy Path action success with spaces in path."""
+    mock_service = MagicMock(spec=NodeService)
+    provider = ExecutableActionProvider(mock_service)
+
+    path_with_spaces = "/bin/my path with spaces"
+    node = Node(
+        id=uuid.uuid4(),
+        name="my_app",
+        node_kind="resource",
+        resource_type="executable",
+        path=path_with_spaces,
+    )
+    context = ResourceActionContext(node=node, resolved_path=path_with_spaces)
+
+    result = provider.execute("copy_path", context)
+    assert result.success is True
+    assert result.message == f"Copied path to clipboard: {path_with_spaces}"
+    mock_copy.assert_called_once_with(path_with_spaces)
+
+
+@patch("pathtree.utils.launcher.PlatformLauncher.copy_to_clipboard")
+def test_executable_copy_path_failure(mock_copy, tmp_path):
+    """Verify Copy Path failure handles error gracefully with no false success."""
+    from pathtree.utils.launcher import LaunchError
+
+    mock_copy.side_effect = LaunchError("No clipboard available.")
+
     mock_service = MagicMock(spec=NodeService)
     provider = ExecutableActionProvider(mock_service)
 
@@ -323,9 +390,84 @@ def test_executable_copy_path():
     context = ResourceActionContext(node=node, resolved_path="/bin/my_app")
 
     result = provider.execute("copy_path", context)
-    assert result.success is True
-    assert result.target == ResourceActionResultTarget.DETAILS
-    assert result.output_value == "Path: /bin/my_app"
+    assert result.success is False
+    assert result.message is None  # no false success message
+    assert "Clipboard error" in result.error_message
+
+
+@patch("pathtree.utils.launcher.PlatformLauncher.copy_to_clipboard")
+def test_consistent_copy_path_across_providers(mock_copy):
+    """Verify all resource providers copy path to clipboard consistently."""
+    from pathtree.actions.directory import DirectoryActionProvider
+    from pathtree.actions.executable import ExecutableActionProvider
+    from pathtree.actions.file import FileActionProvider
+    from pathtree.actions.script import ScriptActionProvider
+
+    mock_service = MagicMock(spec=NodeService)
+    node_id = uuid.uuid4()
+
+    # 1. Directory
+    dir_node = Node(
+        id=node_id,
+        name="dir",
+        node_kind="resource",
+        resource_type="directory",
+        path="/dir",
+    )
+    dir_provider = DirectoryActionProvider(mock_service)
+    res = dir_provider.execute(
+        "copy_path", ResourceActionContext(node=dir_node, resolved_path="/dir")
+    )
+    assert res.success is True
+    assert res.message == "Copied path to clipboard: /dir"
+
+    # 2. File
+    file_node = Node(
+        id=node_id,
+        name="file",
+        node_kind="resource",
+        resource_type="file",
+        path="/file",
+    )
+    file_provider = FileActionProvider(mock_service)
+    res = file_provider.execute(
+        "copy_path", ResourceActionContext(node=file_node, resolved_path="/file")
+    )
+    assert res.success is True
+    assert res.message == "Copied path to clipboard: /file"
+
+    # 3. Script
+    script_node = Node(
+        id=node_id,
+        name="script",
+        node_kind="resource",
+        resource_type="script",
+        path="/script",
+    )
+    script_provider = ScriptActionProvider(mock_service)
+    res = script_provider.execute(
+        "copy_path", ResourceActionContext(node=script_node, resolved_path="/script")
+    )
+    assert res.success is True
+    assert res.message == "Copied path to clipboard: /script"
+
+    # 4. Executable
+    exec_node = Node(
+        id=node_id,
+        name="exec",
+        node_kind="resource",
+        resource_type="executable",
+        path="/exec",
+    )
+    exec_provider = ExecutableActionProvider(mock_service)
+    res = exec_provider.execute(
+        "copy_path", ResourceActionContext(node=exec_node, resolved_path="/exec")
+    )
+    assert res.success is True
+    assert res.message == "Copied path to clipboard: /exec"
+
+    # Ensure clipboard utility was called for all of them
+    assert mock_copy.call_count == 4
 
 
 @patch("subprocess.Popen")

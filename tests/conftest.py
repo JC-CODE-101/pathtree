@@ -30,3 +30,17 @@ def disable_nerd_fonts_for_tests():
     icon_registry.nerd_fonts_enabled = False
     yield
     icon_registry.nerd_fonts_enabled = old_state
+
+
+@pytest.fixture(autouse=True)
+def mock_clipboard_for_tests(request):
+    """Autouse fixture to mock PlatformLauncher.copy_to_clipboard globally."""
+    if "test_platform_launcher_copy_to_clipboard" in request.node.name:
+        yield
+    else:
+        from unittest.mock import patch
+
+        with patch(
+            "pathtree.utils.launcher.PlatformLauncher.copy_to_clipboard"
+        ) as mock:
+            yield mock
