@@ -59,6 +59,7 @@ class PathAutocompleteMode(StrEnum):
 
     DIRECTORY = "directory"
     FILE = "file"
+    EXECUTABLE = "executable"
 
 
 class PathAutocomplete(Widget):
@@ -411,11 +412,19 @@ class PathAutocomplete(Widget):
                                 # Cycle check: exclude if resolves to ancestor chain
                                 if real_cand not in ancestors:
                                     dir_entries.append(entry.name + "/")
-                            elif (
-                                self._mode == PathAutocompleteMode.FILE
-                                and entry.is_file(follow_symlinks=True)
-                            ):
-                                file_entries.append(entry.name)
+                            elif entry.is_file(follow_symlinks=True):
+                                if self._mode == PathAutocompleteMode.FILE:
+                                    file_entries.append(entry.name)
+                                elif self._mode == PathAutocompleteMode.EXECUTABLE:
+                                    from pathlib import Path
+
+                                    from pathtree.utils.path import is_launchable_file
+
+                                    entry_path = Path(
+                                        os.path.join(scandir_path, entry.name)
+                                    )
+                                    if is_launchable_file(entry_path):
+                                        file_entries.append(entry.name)
                         except OSError:
                             # Safely ignore a single broken entry
                             pass

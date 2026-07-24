@@ -154,6 +154,48 @@ The default Unicode symbol for Script resources is `⚡` (Lightning), with custo
 
 ---
 
+# Executable
+
+Purpose
+
+Allows users to register installed applications and command-line programs as workspace resources and launch them.
+
+Examples
+
+- /usr/bin/blender
+- /usr/bin/xournalpp
+- /usr/bin/ffmpeg
+- /usr/bin/git
+- Windows application executables (.exe, .com)
+- macOS application binaries
+
+Semantics
+
+An Executable resource represents a compiled binary or launcher on the local filesystem. Unlike workspaces or folders, Executable resources are terminal/leaf nodes and cannot have any child nodes.
+
+Hierarchy Rules
+
+- Executable resources may be children of:
+  - Workspace
+  - Folder
+- Executable resources may **not** be parent nodes to any other node.
+- An Executable resource must have a non-empty path, which is strictly validated during node creation, editing, and activation.
+
+Validation Rules
+
+- Path is present and non-empty.
+- Target exists on the filesystem.
+- Target is a regular file (directories are strictly rejected).
+- Target is launchable on the current platform:
+  - On POSIX systems (Linux, macOS): The target file must have executable permission set (verified using `X_OK`). An explicit validation error is shown if permission is missing.
+  - On Windows: The target file must end with a valid executable file extension (such as `.exe` or `.com`), avoiding raw reliance on POSIX permission checks.
+
+Icon & Customization
+
+The default Unicode symbol for Executable resources is `⚙` (Gear), with customization options like `⚒` (Hammer), `❖` (Accent Diamond), or `✦` (Star) selectable via the Icon Picker dialog.
+
+---
+
 # Documentation
 
 Purpose

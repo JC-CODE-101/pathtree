@@ -105,15 +105,22 @@ class DirectoryActionProvider(ResourceActionProvider):
                 )
 
         elif action_id == "copy_path":
-            # copy_path execution may return the resolved path as a
-            # result object for now. Do not introduce clipboard dependencies.
-            return ResourceActionResult(
-                success=True,
-                exit_app=False,
-                output_value=f"Path: {resolved_path}",
-                message=f"Copied path: {resolved_path}",
-                target=ResourceActionResultTarget.DETAILS,
-            )
+            from pathtree.utils.launcher import PlatformLauncher
+
+            try:
+                PlatformLauncher.copy_to_clipboard(resolved_path)
+                return ResourceActionResult(
+                    success=True,
+                    exit_app=False,
+                    output_value=f"Path: {resolved_path}",
+                    message=f"Copied path to clipboard: {resolved_path}",
+                    target=ResourceActionResultTarget.DETAILS,
+                )
+            except Exception as e:
+                return ResourceActionResult(
+                    success=False,
+                    error_message=f"Clipboard error: {e}",
+                )
 
         elif action_id == "view_details":
             # view_details may return structured metadata or reuse

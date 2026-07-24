@@ -258,3 +258,129 @@ class PlatformLauncher:
                 success=False,
                 error_message=f"Failed to launch terminal emulator: {e}",
             )
+
+    @classmethod
+    def copy_to_clipboard(cls, text: str) -> None:
+        """Write the exact text to the system clipboard securely without shell=True."""
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+
+                user32 = ctypes.windll.user32
+                kernel32 = ctypes.windll.kernel32
+
+                user32.OpenClipboard.argtypes = [wintypes.HWND]
+                user32.OpenClipboard.restype = wintypes.BOOL
+                user32.EmptyClipboard.argtypes = []
+                user32.EmptyClipboard.restype = wintypes.BOOL
+                user32.CloseClipboard.argtypes = []
+                user32.CloseClipboard.restype = wintypes.BOOL
+                user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+                user32.SetClipboardData.restype = wintypes.HANDLE
+
+                kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+                kernel32.GlobalAlloc.restype = wintypes.HANDLE
+                kernel32.GlobalLock.argtypes = [wintypes.HANDLE]
+                kernel32.GlobalLock.restype = ctypes.c_void_p
+                kernel32.GlobalUnlock.argtypes = [wintypes.HANDLE]
+                kernel32.GlobalUnlock.restype = wintypes.BOOL
+
+                gmem_moveable = 0x0002
+                cf_unicodetext = 13
+
+                text_bytes = (text + "\x00").encode("utf-16le")
+
+                if not user32.OpenClipboard(None):
+                    raise OSError("Failed to open clipboard.")
+
+                try:
+                    user32.EmptyClipboard()
+                    h_mem = kernel32.GlobalAlloc(gmem_moveable, len(text_bytes))
+                    if not h_mem:
+                        raise OSError("GlobalAlloc failed.")
+
+                    p_mem = kernel32.GlobalLock(h_mem)
+                    if not p_mem:
+                        raise OSError("GlobalLock failed.")
+
+                    try:
+                        ctypes.memmove(p_mem, text_bytes, len(text_bytes))
+                    finally:
+                        kernel32.GlobalUnlock(h_mem)
+
+                    if not user32.SetClipboardData(cf_unicodetext, h_mem):
+                        raise OSError("SetClipboardData failed.")
+                finally:
+                    user32.CloseClipboard()
+            except Exception as e:
+                # Fallback to clip.exe
+                if shutil.which("clip"):
+                    try:
+                        subprocess.run(
+                            ["clip"], input=text, text=True, check=True, shell=False
+                        )
+                    except (OSError, subprocess.SubprocessError) as clip_err:
+                        raise LaunchError(
+                            f"Windows clip.exe failed: {clip_err}"
+                        ) from clip_err
+                else:
+                    raise LaunchError(
+                        "No supported Windows clipboard mechanism available. "
+                        f"Details: {e}"
+                    ) from e
+
+        elif sys.platform == "darwin":
+            if not shutil.which("pbcopy"):
+                raise LaunchError("pbcopy executable not found in PATH.")
+            try:
+                subprocess.run(
+                    ["pbcopy"], input=text, text=True, check=True, shell=False
+                )
+            except (OSError, subprocess.SubprocessError) as e:
+                raise LaunchError(f"macOS pbcopy failed: {e}") from e
+
+        else:
+            # Linux and other Unix-like OSes
+            # Select candidates based on session type
+            session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+            if session_type == "wayland":
+                candidates = ["wl-copy", "xclip", "xsel"]
+            elif session_type == "x11":
+                candidates = ["xclip", "xsel"]
+            else:
+                candidates = ["wl-copy", "xclip", "xsel"]
+
+            # Map tools to argv
+            tool_args = {
+                "wl-copy": ["wl-copy"],
+                "xclip": ["xclip", "-selection", "clipboard"],
+                "xsel": ["xsel", "--clipboard", "--input"],
+            }
+
+            installed_backends = []
+            backend_errors = []
+
+            for tool in candidates:
+                if shutil.which(tool):
+                    installed_backends.append(tool)
+                    args = tool_args[tool]
+                    try:
+                        subprocess.run(
+                            args, input=text, text=True, check=True, shell=False
+                        )
+                        return
+                    except (OSError, subprocess.SubprocessError) as e:
+                        backend_errors.append(f"{tool} failed: {e}")
+
+            if not installed_backends:
+                raise LaunchError(
+                    "No supported clipboard mechanism is available on this system. "
+                    "Please install wl-clipboard, xclip, or xsel."
+                )
+
+            # All installed backends failed
+            errors_str = "; ".join(backend_errors)
+            raise LaunchError(
+                f"All available clipboard backends failed to copy: {errors_str}"
+            )

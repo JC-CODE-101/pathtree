@@ -1,7 +1,5 @@
-"""Action provider for file resources."""
+"""Action provider for executable resources."""
 
-import os
-import shlex
 from pathlib import Path
 
 from pathtree.actions.base import (
@@ -15,50 +13,50 @@ from pathtree.services.node_service import NodeService, NodeServiceError
 from pathtree.utils.launcher import LaunchError, PlatformLauncher
 
 
-class FileActionProvider(ResourceActionProvider):
-    """Action provider for 'file' resource types."""
+class ExecutableActionProvider(ResourceActionProvider):
+    """Action provider for 'executable' resource types."""
 
     def __init__(self, node_service: NodeService) -> None:
-        """Initialize the FileActionProvider with a NodeService."""
+        """Initialize the ExecutableActionProvider with a NodeService."""
         self._node_service = node_service
 
     @property
     def resource_type(self) -> str:
         """The supported resource type."""
-        return "file"
+        return "executable"
 
     def get_available_actions(
         self, context: ResourceActionContext
     ) -> list[ResourceAction]:
-        """Returns available actions for file resources."""
+        """Returns available actions for executable resources."""
         return [
             ResourceAction(
-                id="open_file",
-                label="Open File",
-                description="Open this file with the system default application",
+                id="launch",
+                label="Launch",
+                description="Launch this executable safely",
                 is_default=True,
             ),
             ResourceAction(
-                id="edit_file",
-                label="Edit File",
-                description="Open this file in your configured editor",
+                id="open_containing_folder",
+                label="Open Containing Folder",
+                description="Open the folder containing this executable",
             ),
             ResourceAction(
                 id="copy_path",
                 label="Copy Path",
-                description="Copy file path to clipboard",
+                description="Copy executable path to clipboard",
             ),
             ResourceAction(
                 id="view_details",
                 label="View Details",
-                description="Show file metadata and details",
+                description="Show executable metadata and details",
             ),
         ]
 
     def get_default_action(
         self, context: ResourceActionContext
     ) -> ResourceAction | None:
-        """Returns the default action for file resources."""
+        """Returns the default action for executable resources."""
         actions = self.get_available_actions(context)
         return next((a for a in actions if a.is_default), None)
 
@@ -66,13 +64,16 @@ class FileActionProvider(ResourceActionProvider):
         self, action_id: str, context: ResourceActionContext
     ) -> ResourceActionResult:
         """Executes the selected action."""
-        if context.node.node_kind != "resource" or context.node.resource_type != "file":
+        if (
+            context.node.node_kind != "resource"
+            or context.node.resource_type != "executable"
+        ):
             return ResourceActionResult(
                 success=False,
-                error_message="Invalid node type for File provider.",
+                error_message="Invalid node type for Executable provider.",
             )
 
-        # Resolve the file path using either context override or node service
+        # Resolve path
         try:
             if context.resolved_path is not None:
                 resolved_path = context.resolved_path
@@ -86,49 +87,65 @@ class FileActionProvider(ResourceActionProvider):
                 error_message=str(e),
             )
 
-        if action_id == "open_file":
+        path_obj = Path(resolved_path)
+
+        if action_id == "launch":
+            # Validate executable resources before creation, editing and activation
             try:
-                PlatformLauncher.open_path(resolved_path)
-                return ResourceActionResult(
-                    success=True,
-                    exit_app=False,
-                    message=f"Successfully opened file: {resolved_path}",
-                    target=ResourceActionResultTarget.NOTIFICATION,
-                )
-            except LaunchError as e:
+                if not resolved_path:
+                    raise ValueError("Executable path cannot be empty.")
+                if not path_obj.exists():
+                    raise FileNotFoundError(
+                        f"Executable path '{resolved_path}' does not exist."
+                    )
+                if not path_obj.is_file():
+                    raise IsADirectoryError(
+                        f"Executable path '{resolved_path}' is a directory."
+                    )
+                self._node_service.validate_executable_path(path_obj)
+            except Exception as e:
                 return ResourceActionResult(
                     success=False,
                     error_message=str(e),
                 )
 
-        elif action_id == "edit_file":
-            editor_cmd = os.environ.get("EDITOR") or os.environ.get("VISUAL")
-            if not editor_cmd:
+            argv = [resolved_path]
+            res = PlatformLauncher.launch_process(argv, cwd=path_obj.parent)
+            if not res.success:
                 return ResourceActionResult(
                     success=False,
-                    error_message=(
-                        "No editor configured. Please configure the EDITOR or VISUAL "
-                        "environment variable (e.g. export EDITOR='nano')."
-                    ),
+                    error_message=res.error_message or "Process launch failed.",
                 )
 
-            # Split safely to avoid any shell interpolation or injection
+            return ResourceActionResult(
+                success=True,
+                exit_app=False,
+                message=f"Launched executable: {resolved_path}",
+                target=ResourceActionResultTarget.NOTIFICATION,
+            )
+
+        elif action_id == "open_containing_folder":
             try:
-                argv = shlex.split(editor_cmd)
-                if not argv:
-                    raise ValueError("Empty editor command.")
-            except ValueError as e:
+                if not resolved_path:
+                    raise ValueError("Executable path cannot be empty.")
+                parent_dir_obj = path_obj.parent
+                if not parent_dir_obj.exists():
+                    raise FileNotFoundError(
+                        f"Containing folder '{parent_dir_obj}' does not exist."
+                    )
+            except Exception as e:
                 return ResourceActionResult(
                     success=False,
-                    error_message=f"Failed to parse editor command: {e}",
+                    error_message=str(e),
                 )
 
+            parent_dir = str(parent_dir_obj.absolute())
             try:
-                PlatformLauncher.launch_editor(argv, resolved_path)
+                PlatformLauncher.open_path(parent_dir)
                 return ResourceActionResult(
                     success=True,
                     exit_app=False,
-                    message=f"Successfully launched editor: {resolved_path}",
+                    message=f"Opened containing folder: {parent_dir}",
                     target=ResourceActionResultTarget.NOTIFICATION,
                 )
             except LaunchError as e:
@@ -155,7 +172,6 @@ class FileActionProvider(ResourceActionProvider):
 
         elif action_id == "view_details":
             try:
-                path_obj = Path(resolved_path)
                 size = path_obj.stat().st_size
                 size_str = f"{size} bytes"
                 suffix_str = path_obj.suffix or "None"
@@ -165,7 +181,8 @@ class FileActionProvider(ResourceActionProvider):
 
             metadata = (
                 f"Name: {context.node.name}\n"
-                f"Path: {resolved_path}\n"
+                f"Resource Type: executable\n"
+                f"Full Path: {resolved_path}\n"
                 f"Size: {size_str}\n"
                 f"Extension: {suffix_str}"
             )

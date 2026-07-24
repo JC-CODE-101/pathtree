@@ -239,6 +239,22 @@ class NodeService:
                     raise ParentNotFoundError(f"Parent node {curr_id} does not exist.")
                 curr_id = p_node.parent_id
 
+    def validate_executable_path(self, path_obj: Path) -> None:
+        """Validate if the path is launchable on the current platform."""
+        import sys
+
+        from pathtree.utils.path import is_launchable_file
+
+        if not is_launchable_file(path_obj):
+            if sys.platform == "win32":
+                raise ValidationError(
+                    f"Executable path '{path_obj}' is not a valid Windows executable."
+                )
+            else:
+                raise ValidationError(
+                    f"Executable permission is missing on '{path_obj}'."
+                )
+
     def resolve_node_path(self, node_id: uuid.UUID) -> Path:
         """Resolve the selected node's local directory path.
 
@@ -274,7 +290,7 @@ class NodeService:
                         f"Path '{node.path}' for node '{node.name}' "
                         "exists but is not a directory."
                     )
-            elif node.resource_type in ("file", "script"):
+            elif node.resource_type in ("file", "script", "executable"):
                 if not path.is_file():
                     raise PathNotAFileError(
                         f"Path '{node.path}' for node '{node.name}' "
@@ -312,6 +328,7 @@ class NodeService:
         - node_kind = "resource" and resource_type = "directory"
         - node_kind = "resource" and resource_type = "file"
         - node_kind = "resource" and resource_type = "script"
+        - node_kind = "resource" and resource_type = "executable"
 
         Raises:
             ValidationError: If any other combination is provided.
@@ -329,6 +346,8 @@ class NodeService:
         elif kind == "resource" and res_type == "file":
             valid = True
         elif kind == "resource" and res_type == "script":
+            valid = True
+        elif kind == "resource" and res_type == "executable":
             valid = True
 
         if not valid:
@@ -385,8 +404,12 @@ class NodeService:
         if node_kind in ("workspace", "folder") and normalized_path is not None:
             raise ValidationError("Structural nodes must not contain a path.")
 
-        # 5b. Check that a File or Script resource has a valid existing file path
-        if node_kind == "resource" and resource_type in ("file", "script"):
+        # 5b. Check that a File, Script, or Executable has a valid existing path
+        if node_kind == "resource" and resource_type in (
+            "file",
+            "script",
+            "executable",
+        ):
             if not normalized_path:
                 raise ValidationError(
                     f"{resource_type.capitalize()} path cannot be empty."
@@ -402,6 +425,8 @@ class NodeService:
                     f"{resource_type.capitalize()} path "
                     f"'{normalized_path}' is not a regular file."
                 )
+            if resource_type == "executable":
+                self.validate_executable_path(path_obj)
 
         # 6. Assign resource_type="directory" explicitly for directory resources
         if node_kind == "resource" and resource_type is None:
@@ -521,8 +546,12 @@ class NodeService:
         if "is_favorite" in kwargs:
             proposed_is_favorite = kwargs["is_favorite"]
 
-        # If node is a file or script resource, validate proposed path
-        if node.node_kind == "resource" and node.resource_type in ("file", "script"):
+        # If node is a file, script or executable resource, validate proposed path
+        if node.node_kind == "resource" and node.resource_type in (
+            "file",
+            "script",
+            "executable",
+        ):
             path_to_validate = proposed_path
             if not path_to_validate:
                 raise ValidationError(
@@ -539,6 +568,8 @@ class NodeService:
                     f"{node.resource_type.capitalize()} path "
                     f"'{path_to_validate}' is not a regular file."
                 )
+            if node.resource_type == "executable":
+                self.validate_executable_path(path_obj)
 
         # Final checks on a temporary / dummy Node
         dummy_node = Node(
