@@ -196,6 +196,43 @@ The default Unicode symbol for Executable resources is `⚙` (Gear), with custom
 
 ---
 
+# URL
+
+Purpose
+
+Represents a web page, Git repository, API endpoint, or online documentation resource.
+
+Examples
+
+- https://github.com/coder/pathtree
+- https://docs.python.org/3/
+- http://localhost:8000/api/health
+
+Semantics
+
+A URL resource represents a web-based link. Unlike workspaces or folders, URL resources are terminal/leaf nodes and cannot have any child nodes.
+
+Hierarchy Rules
+
+- URL resources may be children of:
+  - Workspace
+  - Folder
+- URL resources may **not** be parent nodes to any other node.
+- A URL resource must have a non-empty path representing a valid URL. This URL is strictly validated during node creation and update.
+
+Validation Rules
+
+- URL is present and non-empty.
+- URL must start with `http://` or `https://`.
+- URL must be well-formed with a valid domain/host.
+
+Icon & Customization
+
+The default Unicode symbol for URL resources is `↗` (Arrow NE), with customization options like `🌐` (Globe), `🔗` (Link), or `➔` (Right Arrow) selectable via the Icon Picker dialog.
+When Nerd Fonts are enabled, the default icon is `󰖟` (URL/Web).
+
+---
+
 # Documentation
 
 Purpose

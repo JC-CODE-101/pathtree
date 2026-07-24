@@ -60,6 +60,7 @@ class PathAutocompleteMode(StrEnum):
     DIRECTORY = "directory"
     FILE = "file"
     EXECUTABLE = "executable"
+    URL = "url"
 
 
 class PathAutocomplete(Widget):
@@ -352,6 +353,10 @@ class PathAutocomplete(Widget):
 
     def update_suggestions(self, value: str) -> None:
         """Scan parent directory and update the suggestions list."""
+        if self._mode == PathAutocompleteMode.URL:
+            self.hide_suggestions()
+            return
+
         last_slash_idx = value.rfind("/")
         if last_slash_idx != -1:
             typed_dir = value[: last_slash_idx + 1]

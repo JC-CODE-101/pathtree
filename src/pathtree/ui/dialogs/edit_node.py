@@ -135,14 +135,15 @@ class EditNodeDialog(ModalScreen[bool]):
                     id="input-name",
                 )
 
-            # Show path for directory, file, script and executable resources
+            # Show path for directory, file, script, executable, and url resources
             is_resource_with_path = (
                 self.node.node_kind == "resource"
                 and self.node.resource_type
-                in ("directory", "file", "script", "executable")
+                in ("directory", "file", "script", "executable", "url")
             )
             with Vertical(classes="field-container", id="path-field-container") as vc:
-                yield Label("Path", classes="field-label")
+                path_label_text = "URL" if self.node.resource_type == "url" else "Path"
+                yield Label(path_label_text, classes="field-label", id="label-path")
                 if (
                     self.node.node_kind == "resource"
                     and self.node.resource_type == "executable"
@@ -153,11 +154,22 @@ class EditNodeDialog(ModalScreen[bool]):
                     "script",
                 ):
                     initial_mode = PathAutocompleteMode.FILE
+                elif (
+                    self.node.node_kind == "resource"
+                    and self.node.resource_type == "url"
+                ):
+                    initial_mode = PathAutocompleteMode.URL
                 else:
                     initial_mode = PathAutocompleteMode.DIRECTORY
+
+                placeholder_text = (
+                    "Enter URL..."
+                    if self.node.resource_type == "url"
+                    else "Enter path..."
+                )
                 yield PathAutocomplete(
                     value=self.node.path or "",
-                    placeholder="Enter path...",
+                    placeholder=placeholder_text,
                     id="input-path",
                     mode=initial_mode,
                 )
@@ -262,18 +274,22 @@ class EditNodeDialog(ModalScreen[bool]):
 
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
-        # Path is only saved/sent for Directory, File, Script, and Executable resources
+        # Path is only saved/sent for Resource kinds with filesystem paths or URLs
         is_resource_with_path = (
             self.node.node_kind == "resource"
-            and self.node.resource_type in ("directory", "file", "script", "executable")
+            and self.node.resource_type
+            in ("directory", "file", "script", "executable", "url")
         )
         path = None
         if is_resource_with_path:
             path_val = self.query_one("#input-path", Input).value or None
             if path_val is not None:
-                from pathtree.utils.path import normalize_path
+                if self.node.resource_type == "url":
+                    path = path_val.strip()
+                else:
+                    from pathtree.utils.path import normalize_path
 
-                path = normalize_path(path_val)
+                    path = normalize_path(path_val)
 
         # Determine temporary promotion
         kwargs = {

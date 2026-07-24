@@ -9,6 +9,7 @@ from pathtree.actions.base import (
 from pathtree.actions.directory import DirectoryActionProvider
 from pathtree.actions.file import FileActionProvider
 from pathtree.actions.registry import ResourceActionRegistry
+from pathtree.actions.url import UrlActionProvider
 
 __all__ = [
     "DirectoryActionProvider",
@@ -18,4 +19,5 @@ __all__ = [
     "ResourceActionProvider",
     "ResourceActionRegistry",
     "ResourceActionResult",
+    "UrlActionProvider",
 ]

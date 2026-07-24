@@ -69,6 +69,41 @@ class PlatformLauncher:
             raise LaunchError(f"Failed to open path: {e}") from e
 
     @classmethod
+    def open_url(cls, url: str) -> None:
+        """Open a URL with the system's default browser securely."""
+        if "\x00" in url:
+            raise LaunchError("URL contains NUL bytes.")
+
+        if sys.platform == "win32":
+            try:
+                os.startfile(url)
+                return
+            except AttributeError as e:
+                raise LaunchError(
+                    f"System default browser launcher is unavailable: {e}"
+                ) from e
+            except OSError as e:
+                raise LaunchError(f"Failed to open URL: {e}") from e
+
+        if sys.platform.startswith("linux"):
+            launcher = "xdg-open"
+        elif sys.platform == "darwin":
+            launcher = "open"
+        else:
+            raise LaunchError(f"Unsupported platform: {sys.platform}")
+
+        # Check launcher availability
+        if not shutil.which(launcher):
+            raise LaunchError(
+                f"System default browser launcher '{launcher}' not found."
+            )
+
+        try:
+            subprocess.Popen([launcher, url])
+        except (OSError, ValueError) as e:
+            raise LaunchError(f"Failed to open URL: {e}") from e
+
+    @classmethod
     def launch_editor(cls, editor_cmd: list[str] | str, path: str) -> None:
         """Launch an editor with a file path."""
         cls.validate_path(path)

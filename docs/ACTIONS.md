@@ -326,9 +326,24 @@ PathTree supports registering and securely launching native compiled executable 
 - **Secure Launcher Abstraction**: Uses `PlatformLauncher.launch_process` to initiate executables cleanly as background processes.
 - **First Version Limitations**: The executable is currently launched without user-defined arguments. Custom argument profiles are deferred and will be implemented in a subsequent phase.
 
+## Concrete Resource Types: URL Resource Support
+
+PathTree supports full-featured, secure URL resources.
+
+### Available Actions
+1. **`open_url` (Default)**
+   - Opens the URL with the platform default web browser.
+   - On Linux, this delegates to `xdg-open`. On macOS, to `open`. On Windows, to `os.startfile`.
+   - Never uses `shell=True`. Always launches using explicit argv or platform APIs.
+
+2. **`copy_url`**
+   - Copies the exact URL to the system clipboard securely using `PlatformLauncher.copy_to_clipboard()`.
+
+3. **`view_details`**
+   - Displays structured metadata about the URL including Name, URL, Scheme, Domain, Path, and Description if present, presented in the details panel using `ResourceActionResultTarget.DETAILS`.
+
 ## Future Resource Types
 - The architecture is designed to accommodate additional resource types such as:
-  - `url` / `open_url`
   - `ssh` / `command`
 
 ## Safety Rules for Command Execution

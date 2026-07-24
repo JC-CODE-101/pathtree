@@ -152,13 +152,14 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     yield RadioButton("File", id="radio-file")
                     yield RadioButton("Script", id="radio-script")
                     yield RadioButton("Executable", id="radio-executable")
+                    yield RadioButton("URL", id="radio-url")
 
             with Vertical(classes="field-container"):
                 yield Label("Name *", classes="field-label")
                 yield HistoryInput(placeholder="Enter name...", id="input-name")
 
             with Vertical(classes="field-container", id="path-field-container"):
-                yield Label("Path", classes="field-label")
+                yield Label("Path", classes="field-label", id="label-path")
                 yield PathAutocomplete(
                     placeholder="Enter path (optional)...", id="input-path"
                 )
@@ -216,6 +217,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             self.selected_type = "script"
         elif radio_id == "radio-executable":
             self.selected_type = "executable"
+        elif radio_id == "radio-url":
+            self.selected_type = "url"
 
         icon_picker = self.query_one(IconPicker)
         if self.selected_type == "workspace":
@@ -230,6 +233,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             icon_picker.set_node_type("resource", "script")
         elif self.selected_type == "executable":
             icon_picker.set_node_type("resource", "executable")
+        elif self.selected_type == "url":
+            icon_picker.set_node_type("resource", "url")
 
         # Update path autocomplete mode based on selection immediately
         try:
@@ -238,6 +243,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 path_autocomplete.set_mode(PathAutocompleteMode.FILE)
             elif self.selected_type == "executable":
                 path_autocomplete.set_mode(PathAutocompleteMode.EXECUTABLE)
+            elif self.selected_type == "url":
+                path_autocomplete.set_mode(PathAutocompleteMode.URL)
             else:
                 path_autocomplete.set_mode(PathAutocompleteMode.DIRECTORY)
         except NoMatches:
@@ -264,21 +271,32 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             create_btn.disabled = False
             return
 
-        # Folder, Directory, File, Script, or Executable:
+        # Folder, Directory, File, Script, Executable, or URL:
         path_container.display = self.selected_type in (
             "directory",
             "file",
             "script",
             "executable",
+            "url",
         )
         temp_checkbox.display = self.selected_type in (
             "directory",
             "file",
             "script",
             "executable",
+            "url",
         )
         parent_container.display = True
         select_parent.disabled = False
+
+        path_label = self.query_one("#label-path", Label)
+        path_input = self.query_one("#input-path", Input)
+        if self.selected_type == "url":
+            path_label.update("URL")
+            path_input.placeholder = "Enter URL (e.g. https://google.com)..."
+        else:
+            path_label.update("Path")
+            path_input.placeholder = "Enter path (optional)..."
 
         # Retrieve all parent choices from node service
         all_choices = self.node_service.get_parent_choices()
@@ -378,20 +396,23 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             resource_type = None
             path = None
             is_temporary = False
-        else:  # directory, file, script, or executable
+        else:  # directory, file, script, executable, or url
             if parent_id is None:
                 status_area.update("A valid parent Workspace or Folder is required.")
                 return
             node_kind = "resource"
             resource_type = (
                 self.selected_type
-            )  # "directory", "file", "script", or "executable"
+            )  # "directory", "file", "script", "executable", or "url"
             path_val = self.query_one("#input-path", Input).value or None
             path = None
             if path_val is not None:
-                from pathtree.utils.path import normalize_path
+                if resource_type == "url":
+                    path = path_val.strip()
+                else:
+                    from pathtree.utils.path import normalize_path
 
-                path = normalize_path(path_val)
+                    path = normalize_path(path_val)
             is_temporary = self.query_one("#checkbox-temporary", Checkbox).value
 
         try:
