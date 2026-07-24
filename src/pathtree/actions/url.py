@@ -67,6 +67,15 @@ class UrlActionProvider(ResourceActionProvider):
 
         url = context.node.path or ""
 
+        if action_id in ("open_url", "copy_url"):
+            try:
+                url = self._node_service.validate_url(url)
+            except Exception as e:
+                return ResourceActionResult(
+                    success=False,
+                    error_message=f"Invalid stored URL: {e}",
+                )
+
         if action_id == "open_url":
             try:
                 PlatformLauncher.open_url(url)

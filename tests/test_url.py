@@ -139,6 +139,43 @@ def test_editing_urls(session: Session):
     assert "URL path cannot be empty" in str(exc.value)
 
 
+def test_url_validation_reusable_scenarios():
+    """Verify reusable validate_url covering various scheme/host scenarios."""
+    mock_repo = MagicMock()
+    service = NodeService(mock_repo)
+
+    # valid HTTP URL
+    assert service.validate_url("http://example.com/foo") == "http://example.com/foo"
+
+    # valid HTTPS URL
+    assert service.validate_url("https://example.com/foo") == "https://example.com/foo"
+
+    # whitespace trimming
+    assert (
+        service.validate_url("   https://example.com/foo   ")
+        == "https://example.com/foo"
+    )
+
+    # query strings and fragments preserved
+    query_frag_url = "https://example.com/search?q=query#fragment"
+    assert service.validate_url(query_frag_url) == query_frag_url
+
+    # missing scheme
+    with pytest.raises(ValidationError) as exc:
+        service.validate_url("example.com")
+    assert "URL must start with http:// or https://" in str(exc.value)
+
+    # unsupported scheme
+    with pytest.raises(ValidationError) as exc:
+        service.validate_url("ftp://example.com")
+    assert "URL must start with http:// or https://" in str(exc.value)
+
+    # missing host
+    with pytest.raises(ValidationError) as exc:
+        service.validate_url("https://")
+    assert "URL is invalid or malformed" in str(exc.value)
+
+
 # ==========================================
 # 2. Action Provider & Registry Tests
 # ==========================================
@@ -245,6 +282,7 @@ def test_browser_launch_fails_safely_when_launcher_missing(mock_which):
 def test_execute_open_url_success(mock_popen):
     """Verify execute open_url action completes successfully."""
     mock_service = MagicMock(spec=NodeService)
+    mock_service.validate_url.side_effect = lambda u: u
     provider = UrlActionProvider(mock_service)
 
     node = Node(
@@ -264,6 +302,46 @@ def test_execute_open_url_success(mock_popen):
             assert "Successfully opened" in result.message
 
 
+def test_invalid_stored_url_rejected_before_browser_launch():
+    """Verify invalid stored URL rejected before browser launch in execute()."""
+    mock_service = MagicMock(spec=NodeService)
+    mock_service.validate_url.side_effect = ValidationError("Invalid scheme")
+    provider = UrlActionProvider(mock_service)
+
+    node = Node(
+        id=uuid.uuid4(),
+        name="Bad URL",
+        node_kind="resource",
+        resource_type="url",
+        path="ftp://bad-url.com",
+    )
+    context = ResourceActionContext(node=node)
+
+    result = provider.execute("open_url", context)
+    assert result.success is False
+    assert "Invalid stored URL" in result.error_message
+
+
+def test_invalid_stored_url_rejected_before_clipboard_copy():
+    """Verify invalid stored URL rejected before clipboard copy in execute()."""
+    mock_service = MagicMock(spec=NodeService)
+    mock_service.validate_url.side_effect = ValidationError("Invalid host")
+    provider = UrlActionProvider(mock_service)
+
+    node = Node(
+        id=uuid.uuid4(),
+        name="Bad URL",
+        node_kind="resource",
+        resource_type="url",
+        path="https://",
+    )
+    context = ResourceActionContext(node=node)
+
+    result = provider.execute("copy_url", context)
+    assert result.success is False
+    assert "Invalid stored URL" in result.error_message
+
+
 # ==========================================
 # 4. Clipboard Tests
 # ==========================================
@@ -273,6 +351,7 @@ def test_execute_open_url_success(mock_popen):
 def test_execute_copy_url_success(mock_copy):
     """Verify copy_url executes successfully and copies URL."""
     mock_service = MagicMock(spec=NodeService)
+    mock_service.validate_url.side_effect = lambda u: u
     provider = UrlActionProvider(mock_service)
 
     node = Node(
