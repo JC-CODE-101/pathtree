@@ -255,6 +255,37 @@ class NodeService:
                     f"Executable permission is missing on '{path_obj}'."
                 )
 
+    def validate_url(self, url: str | None) -> str:
+        """Validate and normalize a URL.
+
+        Trims surrounding whitespace, requires http:// or https://,
+        requires a valid network location/host, and returns the normalized
+        URL with path, query string, and fragment preserved.
+
+        Raises:
+            ValidationError: If the URL is empty, missing scheme/host,
+                             or malformed.
+        """
+        if not url:
+            raise ValidationError("URL path cannot be empty.")
+        trimmed = url.strip()
+        if not trimmed:
+            raise ValidationError("URL path cannot be empty.")
+
+        from urllib.parse import urlparse
+
+        try:
+            parsed = urlparse(trimmed)
+            if parsed.scheme not in ("http", "https"):
+                raise ValidationError("URL must start with http:// or https://")
+            if not parsed.netloc:
+                raise ValidationError("URL is invalid or malformed.")
+            return trimmed
+        except Exception as e:
+            if isinstance(e, ValidationError):
+                raise
+            raise ValidationError(f"URL is invalid or malformed: {e}") from e
+
     def resolve_node_path(self, node_id: uuid.UUID) -> Path:
         """Resolve the selected node's local directory path.
 
@@ -329,6 +360,7 @@ class NodeService:
         - node_kind = "resource" and resource_type = "file"
         - node_kind = "resource" and resource_type = "script"
         - node_kind = "resource" and resource_type = "executable"
+        - node_kind = "resource" and resource_type = "url"
 
         Raises:
             ValidationError: If any other combination is provided.
@@ -348,6 +380,8 @@ class NodeService:
         elif kind == "resource" and res_type == "script":
             valid = True
         elif kind == "resource" and res_type == "executable":
+            valid = True
+        elif kind == "resource" and res_type == "url":
             valid = True
 
         if not valid:
@@ -398,7 +432,10 @@ class NodeService:
 
         normalized_path = None
         if path is not None:
-            normalized_path = normalize_path(path)
+            if node_kind == "resource" and resource_type == "url":
+                normalized_path = path.strip()
+            else:
+                normalized_path = normalize_path(path)
 
         # 5. Check structural workspace and folder nodes must not contain a path
         if node_kind in ("workspace", "folder") and normalized_path is not None:
@@ -427,6 +464,8 @@ class NodeService:
                 )
             if resource_type == "executable":
                 self.validate_executable_path(path_obj)
+        elif node_kind == "resource" and resource_type == "url":
+            normalized_path = self.validate_url(normalized_path)
 
         # 6. Assign resource_type="directory" explicitly for directory resources
         if node_kind == "resource" and resource_type is None:
@@ -527,7 +566,10 @@ class NodeService:
             new_path = kwargs["path"]
             normalized_path = None
             if new_path is not None:
-                normalized_path = normalize_path(new_path)
+                if node.node_kind == "resource" and node.resource_type == "url":
+                    normalized_path = new_path.strip()
+                else:
+                    normalized_path = normalize_path(new_path)
 
             if (
                 node.node_kind in ("workspace", "folder")
@@ -570,6 +612,8 @@ class NodeService:
                 )
             if node.resource_type == "executable":
                 self.validate_executable_path(path_obj)
+        elif node.node_kind == "resource" and node.resource_type == "url":
+            proposed_path = self.validate_url(proposed_path)
 
         # Final checks on a temporary / dummy Node
         dummy_node = Node(
