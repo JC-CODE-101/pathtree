@@ -7,6 +7,7 @@ from pathtree.services.pin_service import PinService
 from pathtree.ui.app import PathTreeApp
 from pathtree.ui.dialogs.action_menu import ResourceActionMenu
 from pathtree.ui.screens.pins import PinsScreen
+from textual.widgets import DataTable
 
 
 @pytest.fixture
@@ -122,3 +123,52 @@ async def test_pins_screen_display_navigation_reorder(
         # Should have selected fol.id or ws.id depending on restored row focus
         # It's verified to close the screen and focus back to the tree
         assert tree.has_focus is True
+
+
+@pytest.mark.asyncio
+async def test_pins_screen_vim_navigation(session: Session, tui_services) -> None:
+    """Verify that lowercase j/k navigates rows in PinsScreen without reordering."""
+    node_service, pin_service = tui_services
+
+    ws = node_service.create_node(name="Work A", node_kind="workspace")
+    fol = node_service.create_node(name="Folder B", node_kind="folder", parent_id=ws.id)
+
+    pin_service.pin_node(ws.id)
+    pin_service.pin_node(fol.id)
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        # Open Pins Screen with 'p'
+        await pilot.press("p")
+        await pilot.pause(0.05)
+
+        assert isinstance(app.screen, PinsScreen)
+        pins_screen = app.screen
+        table = pins_screen.query_one("#pins-table", DataTable)
+
+        # Starts at row 0
+        assert table.cursor_row == 0
+
+        # Press 'k' (up) at first row - should be harmless and remain at 0
+        await pilot.press("k")
+        assert table.cursor_row == 0
+
+        # Press 'j' (down) - should navigate to row 1
+        await pilot.press("j")
+        assert table.cursor_row == 1
+
+        # Press 'j' (down) at last row - should be harmless and remain at 1
+        await pilot.press("j")
+        assert table.cursor_row == 1
+
+        # Press 'k' (up) - should navigate back to row 0
+        await pilot.press("k")
+        assert table.cursor_row == 0
+
+        # Verify no reordering occurred (ws is still position 1, fol is still position 2)
+        pins = pin_service.list_pins()
+        assert pins[0].node_id == ws.id
+        assert pins[1].node_id == fol.id

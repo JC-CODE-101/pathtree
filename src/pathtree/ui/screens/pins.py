@@ -14,7 +14,7 @@ from pathtree.services.pin_service import PinService
 class PinsScreen(ModalScreen[uuid.UUID | None]):
     """Modal screen displaying global pinned resources.
 
-    Supports wrapping navigation, reordering (via K/Ctrl+Up and J/Ctrl+Down),
+    Supports wrapping navigation, reordering (via Shift+K/Ctrl+Up and Shift+J/Ctrl+Down),
     unpinning (via 'x' / 'u' / 'delete'), and activation to locate/select the
     original node in the tree.
     """
@@ -61,12 +61,14 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
         Binding("u", "unpin_selected", "Unpin", show=True),
         Binding("x", "unpin_selected", "Unpin", show=False),
         Binding("delete", "unpin_selected", "Unpin", show=False),
-        Binding("K", "move_pin_up", "Up", show=True),
-        Binding("shift+k", "move_pin_up", "Up", show=False),
-        Binding("ctrl+up", "move_pin_up", "Up", show=False),
-        Binding("J", "move_pin_down", "Down", show=True),
-        Binding("shift+j", "move_pin_down", "Down", show=False),
-        Binding("ctrl+down", "move_pin_down", "Down", show=False),
+        Binding("j", "cursor_down", "Nav Down", show=False),
+        Binding("k", "cursor_up", "Nav Up", show=False),
+        Binding("K", "move_pin_up", "Reorder Up", show=True),
+        Binding("shift+k", "move_pin_up", "Reorder Up", show=False),
+        Binding("ctrl+up", "move_pin_up", "Reorder Up", show=False),
+        Binding("J", "move_pin_down", "Reorder Down", show=True),
+        Binding("shift+j", "move_pin_down", "Reorder Down", show=False),
+        Binding("ctrl+down", "move_pin_down", "Reorder Down", show=False),
     ]
 
     def __init__(self, node_service: NodeService, pin_service: PinService) -> None:
@@ -80,7 +82,7 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
             yield Label("Global Pinned Resources", classes="pins-title")
             yield DataTable(id="pins-table")
             yield Label(
-                "[Enter] Go | [x/u] Unpin | [K] Up | [J] Down | [Esc/q] Close",
+                "[Enter] Go | [x/u] Unpin | [j/k] Move | [Shift+J/K] Reorder | [Esc/q] Close",
                 classes="pins-help",
             )
 
@@ -155,6 +157,18 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
             self.pin_service.unpin_node(node_id)
             self.app.notify("Unpinned successfully")
             self.reload_pins(select_row_idx=cursor_row)
+
+    def action_cursor_down(self) -> None:
+        table = self.query_one("#pins-table", DataTable)
+        cursor_row = table.cursor_row
+        if cursor_row is not None and cursor_row < len(self._row_node_ids) - 1:
+            table.move_cursor(row=cursor_row + 1)
+
+    def action_cursor_up(self) -> None:
+        table = self.query_one("#pins-table", DataTable)
+        cursor_row = table.cursor_row
+        if cursor_row is not None and cursor_row > 0:
+            table.move_cursor(row=cursor_row - 1)
 
     def action_move_pin_up(self) -> None:
         table = self.query_one("#pins-table", DataTable)
