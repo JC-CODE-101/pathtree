@@ -6,8 +6,9 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine, text
 
-# Ensure Node is imported so it registers on SQLModel.metadata
+# Ensure models are imported so they register on SQLModel.metadata
 from pathtree.models.node import Node  # noqa: F401
+from pathtree.models.pin import Pin  # noqa: F401
 
 
 class UnsupportedDatabaseVersionError(Exception):
@@ -48,13 +49,15 @@ def create_db_engine(db_path: Path) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Query user_version, generate tables if needed, and migrate to version 2.
+    """Query user_version, generate tables if needed, and migrate to version 3.
 
-    If the database reports user_version > 2, we refuse startup with
+    If the database reports user_version > 3, we refuse startup with
     UnsupportedDatabaseVersionError.
-    Fresh database creates tables directly at version 2.
-    An existing version 1 (or 0) database is migrated transactionally to version 2.
-    Version 2 database no-ops cleanly.
+    Fresh database creates tables directly at version 3.
+    An existing version 1 (or 0) database is migrated transactionally to
+    version 2, then to 3.
+    An existing version 2 database is migrated transactionally to version 3.
+    Version 3 database no-ops cleanly.
     """
     with Session(engine) as session:
         connection = session.connection()
@@ -62,9 +65,9 @@ def init_db(engine: Engine) -> None:
         # Read version before any database mutation or table checks
         version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
 
-        if version > 2:
+        if version > 3:
             raise UnsupportedDatabaseVersionError(
-                f"Database version {version} is newer than the supported version 2."
+                f"Database version {version} is newer than the supported version 3."
             )
 
         # Check if 'nodes' table exists after version check
@@ -76,10 +79,13 @@ def init_db(engine: Engine) -> None:
         if not table_exists:
             # Create all tables defined in SQLModel metadata
             SQLModel.metadata.create_all(engine)
-            # Set user_version to 2
-            connection.execute(text("PRAGMA user_version = 2;"))
+            # Set user_version to 3
+            connection.execute(text("PRAGMA user_version = 3;"))
             session.commit()
-        elif version in (0, 1):
+            return
+
+        # Sequential migrations for existing databases
+        if version in (0, 1):
             # Use raw DBAPI connection to handle transactional DDL in SQLite correctly
             # and prevent python sqlite3 auto-committing on ALTER TABLE statements.
             dbapi_conn = connection.connection.dbapi_connection
@@ -141,6 +147,7 @@ def init_db(engine: Engine) -> None:
                 cursor.execute("PRAGMA user_version = 2;")
                 dbapi_conn.commit()
                 cursor.close()
+                version = 2
             except Exception as e:
                 try:
                     dbapi_conn.rollback()
@@ -150,9 +157,46 @@ def init_db(engine: Engine) -> None:
                     f"Migration from version {version} to 2 failed. "
                     "All changes rolled back."
                 ) from e
-        elif version == 2:
-            # No-op cleanly
-            pass
+
+        if version == 2:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+
+                # Create pins table with foreign key ON DELETE CASCADE
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS pins (
+                        id VARCHAR NOT NULL,
+                        node_id VARCHAR NOT NULL,
+                        position INTEGER NOT NULL,
+                        custom_label VARCHAR,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(node_id) REFERENCES nodes (id) ON DELETE CASCADE
+                    );
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_pins_node_id ON pins (node_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_pins_position ON pins (position);"
+                )
+
+                cursor.execute("PRAGMA user_version = 3;")
+                dbapi_conn.commit()
+                cursor.close()
+                version = 3
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Migration from version {version} to 3 failed. "
+                    "All changes rolled back."
+                ) from e
 
 
 _engine: Engine | None = None

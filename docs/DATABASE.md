@@ -40,7 +40,7 @@ The database stores data only.
 
 # Core Entities
 
-The first version of PathTree is built around four core entities.
+The first version of PathTree is built around five core entities.
 
 ## Node
 
@@ -56,6 +56,22 @@ Examples:
 - Note
 
 Every node belongs to exactly one parent except the root node.
+
+---
+
+## Pin
+
+Represents a global shortcut pin/reference to an existing node.
+
+Fields:
+- `id`: Unique identifier (UUID).
+- `node_id`: References the target node (`nodes.id`).
+- `position`: Numeric ordering / stable index of the pin (1-based, contiguous).
+- `custom_label`: Optional label to override the original node's display name.
+- `created_at`: Creation timestamp.
+- `updated_at`: Modification timestamp.
+
+Deleting a node cascade-deletes its associated pin.
 
 ---
 

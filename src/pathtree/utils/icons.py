@@ -333,6 +333,12 @@ class IconRegistry:
             return icon_dict["nerd"]
         return icon_dict["safe"]
 
+    def get_pin_marker(self) -> str:
+        """Get the pin marker symbol based on Nerd Font availability."""
+        if self.nerd_fonts_enabled:
+            return "󰐃"
+        return "📌"
+
 
 icon_registry = IconRegistry()
 

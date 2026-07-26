@@ -68,7 +68,13 @@ class NodeTreeView(Tree[uuid.UUID]):
         Binding("o", "open_action_menu", "Open Action Menu", show=True),
         Binding("O", "open_action_menu", "Open Action Menu", show=False),
         Binding("shift+o", "open_action_menu", "Open Action Menu", show=False),
+        Binding("p", "open_pins_list", "Open Pins Screen", show=True),
+        Binding("P", "open_pins_list", "Open Pins Screen", show=False),
+        Binding("shift+p", "open_pins_list", "Open Pins Screen", show=False),
     ]
+
+    class OpenPinsList(Message):
+        """Sent when 'p' is pressed to open the Pins list screen."""
 
     class ActivateNode(Message):
         """Sent when a node is activated (via Enter or Double Click)."""
@@ -264,6 +270,16 @@ class NodeTreeView(Tree[uuid.UUID]):
 
         node_map = {}
 
+        # Pre-fetch currently pinned node IDs in a single query to avoid
+        # database query regression
+        try:
+            from pathtree.database.repository import PinRepository
+
+            pin_repo = PinRepository(self.node_service.repository.session)
+            pinned_node_ids = {pin.node_id for pin in pin_repo.list_all()}
+        except Exception:
+            pinned_node_ids = set()
+
         def add_recursive(
             parent_tree_node: TextualTreeNode[uuid.UUID], app_tree_node: TreeNode
         ) -> None:
@@ -277,6 +293,10 @@ class NodeTreeView(Tree[uuid.UUID]):
             from pathtree.utils.icons import icon_registry
 
             icon = icon_registry.get_icon(db_node)
+
+            # Prepend pin marker if the node is globally pinned
+            if db_node.id in pinned_node_ids:
+                icon = f"{icon_registry.get_pin_marker()} {icon}"
 
             label = IconText(db_node.name, icon)
 
@@ -342,6 +362,10 @@ class NodeTreeView(Tree[uuid.UUID]):
     def action_open_action_menu(self) -> None:
         """Post OpenActionMenu message."""
         self.post_message(self.OpenActionMenu())
+
+    def action_open_pins_list(self) -> None:
+        """Post OpenPinsList message."""
+        self.post_message(self.OpenPinsList())
 
     def get_visible_nodes(self) -> list[TextualTreeNode[uuid.UUID]]:
         """Get all visible nodes in depth-first pre-order tree traversal."""
