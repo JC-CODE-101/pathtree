@@ -270,9 +270,11 @@ class NodeTreeView(Tree[uuid.UUID]):
 
         node_map = {}
 
-        # Pre-fetch currently pinned node IDs in a single query to avoid database query regression
+        # Pre-fetch currently pinned node IDs in a single query to avoid
+        # database query regression
         try:
             from pathtree.database.repository import PinRepository
+
             pin_repo = PinRepository(self.node_service.repository.session)
             pinned_node_ids = {pin.node_id for pin in pin_repo.list_all()}
         except Exception:

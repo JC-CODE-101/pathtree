@@ -80,7 +80,7 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
             yield Label("Global Pinned Resources", classes="pins-title")
             yield DataTable(id="pins-table")
             yield Label(
-                "[Enter] Go | [x/u] Unpin | [K/Ctrl+Up] Up | [J/Ctrl+Down] Down | [Esc/q] Close",
+                "[Enter] Go | [x/u] Unpin | [K] Up | [J] Down | [Esc/q] Close",
                 classes="pins-help",
             )
 

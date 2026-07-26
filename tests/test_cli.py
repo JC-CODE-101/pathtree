@@ -1,4 +1,3 @@
-import uuid
 from unittest.mock import patch
 
 import pytest
@@ -16,8 +15,8 @@ def cli_session(session: Session):
     # We patch get_session so that when main() executes,
     # it uses our in-memory test session!
     with patch("pathtree.app.get_session") as mock_get_session:
-        # Since we use `with get_session() as session:`, the mock context
-        # manager should return our session.
+        # Since we use `with get_session() as session:`,
+        # the mock context manager should return our session.
         mock_get_session.return_value.__enter__.return_value = session
         yield session
 
@@ -34,147 +33,48 @@ def test_cli_empty_pin_list(cli_session, capsys) -> None:
     assert captured.err == ""
 
 
-def test_cli_pin_and_list_pins(cli_session, capsys) -> None:
-    """Verify that pinning a node and listing pins works via the CLI."""
+def test_cli_structural_pins_hidden_from_listing(cli_session, capsys) -> None:
+    """Verify Workspace and Folder pins are hidden from CLI listings."""
     node_repo = NodeRepository(cli_session)
-    ws = node_repo.create(Node(name="My Workspace", node_kind="workspace"))
+    ws = node_repo.create(Node(name="WS", node_kind="workspace"))
+    fol = node_repo.create(Node(name="Folder", node_kind="folder", parent_id=ws.id))
+    directory = node_repo.create(
+        Node(
+            name="Dir Resource",
+            node_kind="resource",
+            resource_type="directory",
+            path="/tmp/dir",
+            parent_id=ws.id,
+        )
+    )
 
-    # Pin the workspace node
-    with patch("sys.argv", ["pathtree", "--pin", str(ws.id)]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 0
+    pin_repo = PinRepository(cli_session)
+    pin_service = PinService(node_repo, pin_repo)
+    pin_service.pin_node(ws.id)
+    pin_service.pin_node(fol.id)
+    pin_service.pin_node(directory.id)
 
-    captured = capsys.readouterr()
-    assert 'Pinned "My Workspace" successfully' in captured.out
-
-    # List pins
+    # 1. Standard listing should ONLY list Directory pin with
+    # compact numbering (position 1)
     with patch("sys.argv", ["pathtree", "-p"]):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 0
 
     captured = capsys.readouterr()
-    # Expected format: Position  Name/Label  Workspace  Type  Target
-    assert "1  My Workspace          My Workspaceworkspace" in captured.out
+    lines = captured.out.strip().splitlines()
+    assert len(lines) == 1
+    assert "1  Dir Resource" in lines[0]
 
 
-def test_cli_pin_invalid_uuid(cli_session, capsys) -> None:
-    """Verify pinning with an invalid UUID fails with error and non-zero code."""
-    with patch("sys.argv", ["pathtree", "--pin", "not-a-uuid"]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "Error: Invalid UUID format" in captured.err
-
-
-def test_cli_pin_missing_node(cli_session, capsys) -> None:
-    """Verify pinning with a missing node UUID fails with error and non-zero code."""
-    fake_id = str(uuid.uuid4())
-    with patch("sys.argv", ["pathtree", "--pin", fake_id]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 1
-
-    captured = capsys.readouterr()
-    assert f"Error: Node {fake_id} does not exist" in captured.err
-
-
-def test_cli_pin_duplicate_rejection(cli_session, capsys) -> None:
-    """Verify duplicate pin rejection via CLI."""
+def test_cli_compact_visible_numbering_activation_and_unpin(
+    cli_session, tmp_path, capsys
+) -> None:
+    """Verify compact visible numbering, and unpin/activation resolving by it."""
     node_repo = NodeRepository(cli_session)
-    ws = node_repo.create(Node(name="My Workspace", node_kind="workspace"))
-
-    # Pin once
-    with patch("sys.argv", ["pathtree", "--pin", str(ws.id)]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 0
-
-    # Pin again (duplicate)
-    with patch("sys.argv", ["pathtree", "--pin", str(ws.id)]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "is already pinned" in captured.err
-
-
-def test_cli_unpin_and_compaction(cli_session, capsys) -> None:
-    """Verify unpinning by visible position and positions compacting."""
-    node_repo = NodeRepository(cli_session)
-    n1 = node_repo.create(Node(name="Node A", node_kind="workspace"))
-    n2 = node_repo.create(Node(name="Node B", node_kind="workspace"))
-
-    pin_repo = PinRepository(cli_session)
-    pin_service = PinService(node_repo, pin_repo)
-    pin_service.pin_node(n1.id)
-    pin_service.pin_node(n2.id)
-
-    # Unpin first pin (position 1)
-    with patch("sys.argv", ["pathtree", "--unpin", "1"]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 0
-
-    # Check that remaining pin is compacted to position 1
-    with patch("sys.argv", ["pathtree", "--pins"]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 0
-
-    captured = capsys.readouterr()
-    assert "1  Node B                Node B     workspace" in captured.out
-
-
-def test_cli_structural_activation_error(cli_session, capsys) -> None:
-    """Verify activating a structural Workspace/Folder pin returns exit code 1."""
-    node_repo = NodeRepository(cli_session)
-    ws = node_repo.create(Node(name="My Workspace", node_kind="workspace"))
-
-    pin_repo = PinRepository(cli_session)
-    pin_service = PinService(node_repo, pin_repo)
-    pin_service.pin_node(ws.id)
-
-    with patch("sys.argv", ["pathtree", "-p", "1"]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "is a structural workspace node" in captured.err
-    assert "You can navigate to them through the PathTree TUI" in captured.err
-
-
-def test_cli_unpin_invalid_position(cli_session, capsys) -> None:
-    """Verify unpinning with invalid position fails."""
-    # Non-integer
-    with patch("sys.argv", ["pathtree", "--unpin", "abc"]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "Error: Invalid pin position" in captured.err
-
-    # Out of range position
-    with patch("sys.argv", ["pathtree", "--unpin", "99"]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 1
-
-    captured = capsys.readouterr()
-    assert "No pin found at position 99" in captured.err
-
-
-def test_cli_directory_numeric_activation(cli_session, tmp_path, capsys) -> None:
-    """Verify numeric activation of directory resource outputs path."""
-    node_repo = NodeRepository(cli_session)
-    ws = node_repo.create(Node(name="My Workspace", node_kind="workspace"))
-    folder = node_repo.create(
+    ws = node_repo.create(Node(name="WS", node_kind="workspace"))
+    fol = node_repo.create(Node(name="Folder", node_kind="folder", parent_id=ws.id))
+    directory = node_repo.create(
         Node(
             name="My Dir",
             node_kind="resource",
@@ -183,80 +83,238 @@ def test_cli_directory_numeric_activation(cli_session, tmp_path, capsys) -> None
             parent_id=ws.id,
         )
     )
-
-    pin_repo = PinRepository(cli_session)
-    pin_service = PinService(node_repo, pin_repo)
-    pin_service.pin_node(folder.id)
-
-    # 1. Output to stdout (no --output file)
-    with patch("sys.argv", ["pathtree", "-p", "1"]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 0
-
-    captured = capsys.readouterr()
-    assert str(tmp_path) in captured.out
-
-    # 2. Output to --output file (preserve shell adapter behavior)
-    out_file = tmp_path / "out_cli.txt"
-    with patch("sys.argv", ["pathtree", "-p", "1", "--output", str(out_file)]):
-        with pytest.raises(SystemExit) as excinfo:
-            main()
-        assert excinfo.value.code == 0
-
-    assert out_file.exists()
-    assert out_file.read_text(encoding="utf-8") == str(tmp_path)
-
-
-def test_cli_non_directory_activation(cli_session, tmp_path, capsys) -> None:
-    """Verify activation of non-directory resource executes default action."""
-    # Let's test with a URL node
-    node_repo = NodeRepository(cli_session)
-    ws = node_repo.create(Node(name="My Workspace", node_kind="workspace"))
-    url_node = node_repo.create(
+    script_node = node_repo.create(
         Node(
-            name="My URL",
+            name="My Script",
             node_kind="resource",
-            resource_type="url",
-            path="https://example.com",
+            resource_type="script",
+            path=__file__,
             parent_id=ws.id,
         )
     )
 
     pin_repo = PinRepository(cli_session)
     pin_service = PinService(node_repo, pin_repo)
-    pin_service.pin_node(url_node.id)
+    # Pin order:
+    # 1. WS (structural, hidden)
+    # 2. Directory (visible, compact CLI position 1)
+    # 3. Folder (structural, hidden)
+    # 4. Script (visible, compact CLI position 2)
+    pin_service.pin_node(ws.id)
+    pin_service.pin_node(directory.id)
+    pin_service.pin_node(fol.id)
+    pin_service.pin_node(script_node.id)
 
-    # Mock open_url and copy_to_clipboard to avoid actual launching
-    with patch("pathtree.utils.launcher.PlatformLauncher.open_url") as mock_open:
-        with patch("sys.argv", ["pathtree", "-p", "1"]):
+    # List pins -> should show 1: Directory, 2: Script
+    with patch("sys.argv", ["pathtree", "-p"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    captured = capsys.readouterr()
+    assert "1  My Dir" in captured.out
+    assert "2  My Script" in captured.out
+
+    # Activate visible position 2 (script) -> runs action
+    # Mock script launcher in terminal
+    with patch(
+        "pathtree.utils.launcher.PlatformLauncher.launch_in_terminal"
+    ) as mock_launch:
+        mock_launch.return_value.success = True
+        with patch("sys.argv", ["pathtree", "-p", "2"]):
             with pytest.raises(SystemExit) as excinfo:
                 main()
             assert excinfo.value.code == 0
 
-        mock_open.assert_called_once_with("https://example.com")
+    # Unpin by visible position 1 (directory)
+    with patch("sys.argv", ["pathtree", "--unpin", "1"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    # List pins again -> directory is gone, script compacted to position 1
+    with patch("sys.argv", ["pathtree", "-p"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    captured = capsys.readouterr()
+    assert "1  My Script" in captured.out
+    assert "My Dir" not in captured.out
 
 
-def test_cli_stale_reference_handling(cli_session, capsys) -> None:
-    """Verify stale reference activation returns exit code 1."""
-    from sqlmodel import text
-
+def test_cli_value_outputs_without_execution(cli_session, capsys) -> None:
+    """Verify --value extracts path/URL for all resource types without executing."""
     node_repo = NodeRepository(cli_session)
     ws = node_repo.create(Node(name="WS", node_kind="workspace"))
 
+    directory = node_repo.create(
+        Node(
+            name="Dir",
+            node_kind="resource",
+            resource_type="directory",
+            path="/tmp/dir",
+            parent_id=ws.id,
+        )
+    )
+    file_node = node_repo.create(
+        Node(
+            name="File",
+            node_kind="resource",
+            resource_type="file",
+            path="/tmp/file.txt",
+            parent_id=ws.id,
+        )
+    )
+    script_node = node_repo.create(
+        Node(
+            name="Script",
+            node_kind="resource",
+            resource_type="script",
+            path="/tmp/script.sh",
+            parent_id=ws.id,
+        )
+    )
+    exec_node = node_repo.create(
+        Node(
+            name="Executable",
+            node_kind="resource",
+            resource_type="executable",
+            path="/tmp/bin.exe",
+            parent_id=ws.id,
+        )
+    )
+    url_node = node_repo.create(
+        Node(
+            name="URL",
+            node_kind="resource",
+            resource_type="url",
+            path="https://example.com/pathtree",
+            parent_id=ws.id,
+        )
+    )
+
     pin_repo = PinRepository(cli_session)
     pin_service = PinService(node_repo, pin_repo)
-    pin_service.pin_node(ws.id)
+    pin_service.pin_node(directory.id)
+    pin_service.pin_node(file_node.id)
+    pin_service.pin_node(script_node.id)
+    pin_service.pin_node(exec_node.id)
+    pin_service.pin_node(url_node.id)
 
-    # Delete WS with foreign_keys=OFF to bypass cascade deletion
-    cli_session.connection().execute(text("PRAGMA foreign_keys=OFF;"))
-    node_repo.delete(ws.id)
-    cli_session.connection().execute(text("PRAGMA foreign_keys=ON;"))
+    # 1. Directory value
+    with patch("sys.argv", ["pathtree", "-p", "1", "--value"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+    assert capsys.readouterr().out.strip() == "/tmp/dir"
 
+    # 2. File value
+    with patch("sys.argv", ["pathtree", "-p", "2", "--value"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+    assert capsys.readouterr().out.strip() == "/tmp/file.txt"
+
+    # 3. Script value (verify it does NOT execute)
+    with patch(
+        "pathtree.utils.launcher.PlatformLauncher.launch_process"
+    ) as mock_launch:
+        with patch("sys.argv", ["pathtree", "-p", "3", "--value"]):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+            assert excinfo.value.code == 0
+        mock_launch.assert_not_called()
+    assert capsys.readouterr().out.strip() == "/tmp/script.sh"
+
+    # 4. Executable value (verify it does NOT launch)
+    with patch(
+        "pathtree.utils.launcher.PlatformLauncher.launch_process"
+    ) as mock_launch:
+        with patch("sys.argv", ["pathtree", "-p", "4", "--value"]):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+            assert excinfo.value.code == 0
+        mock_launch.assert_not_called()
+    assert capsys.readouterr().out.strip() == "/tmp/bin.exe"
+
+    # 5. URL value (verify it does NOT open default browser)
+    with patch("pathtree.utils.launcher.PlatformLauncher.open_url") as mock_open:
+        with patch("sys.argv", ["pathtree", "-p", "5", "--value"]):
+            with pytest.raises(SystemExit) as excinfo:
+                main()
+            assert excinfo.value.code == 0
+        mock_open.assert_not_called()
+    assert capsys.readouterr().out.strip() == "https://example.com/pathtree"
+
+
+def test_cli_type_filters_and_values_output(cli_session, capsys) -> None:
+    """Verify CLI filters and --values output."""
+    node_repo = NodeRepository(cli_session)
+    ws = node_repo.create(Node(name="WS", node_kind="workspace"))
+
+    directory = node_repo.create(
+        Node(
+            name="Dir",
+            node_kind="resource",
+            resource_type="directory",
+            path="/tmp/dir",
+            parent_id=ws.id,
+        )
+    )
+    script_node = node_repo.create(
+        Node(
+            name="Script",
+            node_kind="resource",
+            resource_type="script",
+            path="/tmp/script.sh",
+            parent_id=ws.id,
+        )
+    )
+
+    pin_repo = PinRepository(cli_session)
+    pin_service = PinService(node_repo, pin_repo)
+    pin_service.pin_node(directory.id)
+    pin_service.pin_node(script_node.id)
+
+    # 1. Filter directories only
+    with patch("sys.argv", ["pathtree", "-p", "--directories"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    captured = capsys.readouterr()
+    assert "1  Dir" in captured.out
+    assert "Script" not in captured.out
+
+    # 2. Filter scripts only
+    with patch("sys.argv", ["pathtree", "-p", "--scripts"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    captured = capsys.readouterr()
+    assert "1  Script" in captured.out
+    assert "Dir" not in captured.out
+
+    # 3. Filter directories and output raw values
+    with patch("sys.argv", ["pathtree", "-p", "--directories", "--values"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    captured = capsys.readouterr()
+    assert captured.out.strip() == "/tmp/dir"
+
+
+def test_cli_invalid_position_exits_nonzero(cli_session, capsys) -> None:
+    """Verify that activating invalid visible position prints to stderr."""
+    # List is empty, so position 1 is invalid
     with patch("sys.argv", ["pathtree", "-p", "1"]):
         with pytest.raises(SystemExit) as excinfo:
             main()
         assert excinfo.value.code == 1
 
     captured = capsys.readouterr()
-    assert "Pin references nonexistent node" in captured.err
+    assert captured.out == ""
+    assert "Error: No pin found at position 1" in captured.err

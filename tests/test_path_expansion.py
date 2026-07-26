@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from pathtree.utils.path import normalize_path

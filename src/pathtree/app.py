@@ -54,6 +54,52 @@ def main() -> None:
         type=str,
         help="Unpin a node by its visible numeric position.",
     )
+    parser.add_argument(
+        "--directories",
+        "-d",
+        action="store_true",
+        help="Filter pins to show only directory resources.",
+    )
+    parser.add_argument(
+        "--files",
+        "-f",
+        action="store_true",
+        help="Filter pins to show only file resources.",
+    )
+    parser.add_argument(
+        "--scripts",
+        "-s",
+        action="store_true",
+        help="Filter pins to show only script resources.",
+    )
+    parser.add_argument(
+        "--executables",
+        "-x",
+        action="store_true",
+        help="Filter pins to show only executable resources.",
+    )
+    parser.add_argument(
+        "--urls",
+        "-u",
+        action="store_true",
+        help="Filter pins to show only URL resources.",
+    )
+    parser.add_argument(
+        "--value",
+        action="store_true",
+        help=(
+            "Output only the target path or URL of the activated pin to "
+            "stdout without running actions."
+        ),
+    )
+    parser.add_argument(
+        "--values",
+        action="store_true",
+        help=(
+            "Output raw values of all matched pins (one per line) "
+            "instead of formatting a table."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -65,7 +111,16 @@ def main() -> None:
         sys.exit(0)
 
     # CLI Management or Pin List operations
-    if args.pin is not None or args.unpin is not None or args.pins is not None:
+    if (
+        args.pin is not None
+        or args.unpin is not None
+        or args.pins is not None
+        or args.directories
+        or args.files
+        or args.scripts
+        or args.executables
+        or args.urls
+    ):
         with get_session() as session:
             node_repo = NodeRepository(session)
             node_service = NodeService(node_repo)
@@ -76,7 +131,7 @@ def main() -> None:
             pin_repo = PinRepository(session)
             pin_service = PinService(node_repo, pin_repo)
 
-            # 1. Pin management
+            # 1. Pin management (add pin)
             if args.pin is not None:
                 try:
                     node_id = uuid.UUID(args.pin)
@@ -97,7 +152,39 @@ def main() -> None:
                     print(f"Error: {e}", file=sys.stderr)
                     sys.exit(1)
 
-            # 2. Unpin management
+            # Build visible CLI pins list (filtering out structural kinds)
+            all_pins = pin_service.list_pins()
+            visible_pins = []
+            for pin in all_pins:
+                node = node_service.get_node(pin.node_id)
+                if node is not None and node.node_kind == "resource":
+                    visible_pins.append((pin, node))
+
+            # Apply explicit type filters
+            has_filter = (
+                args.directories
+                or args.files
+                or args.scripts
+                or args.executables
+                or args.urls
+            )
+            if has_filter:
+                filtered_pins = []
+                for pin, node in visible_pins:
+                    res_type = node.resource_type
+                    if args.directories and res_type == "directory":
+                        filtered_pins.append((pin, node))
+                    elif args.files and res_type == "file":
+                        filtered_pins.append((pin, node))
+                    elif args.scripts and res_type == "script":
+                        filtered_pins.append((pin, node))
+                    elif args.executables and res_type == "executable":
+                        filtered_pins.append((pin, node))
+                    elif args.urls and res_type == "url":
+                        filtered_pins.append((pin, node))
+                visible_pins = filtered_pins
+
+            # 2. Unpin management (uses visible position)
             if args.unpin is not None:
                 try:
                     pos = int(args.unpin)
@@ -110,9 +197,17 @@ def main() -> None:
                     )
                     sys.exit(1)
 
+                if pos > len(visible_pins):
+                    print(
+                        f"Error: Invalid pin position {pos}. "
+                        "No pin found at that position.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+                pin_to_unpin, _ = visible_pins[pos - 1]
                 try:
-                    pin = pin_service.get_pin_by_position(pos)
-                    pin_service.unpin_node(pin.node_id)
+                    pin_service.unpin_node(pin_to_unpin.node_id)
                     print(f"Unpinned position {pos} successfully.")
                     sys.exit(0)
                 except PinServiceError as e:
@@ -120,8 +215,8 @@ def main() -> None:
                     sys.exit(1)
 
             # 3. Pins list or activation
-            if args.pins is not None:
-                # Check if pins parameter is numeric (position)
+            if args.pins is not None or has_filter:
+                # Resolve if -p parameter is numeric (activation)
                 is_numeric = False
                 pos_val = 0
                 if isinstance(args.pins, str):
@@ -131,45 +226,39 @@ def main() -> None:
                     except ValueError:
                         pass
 
-                if args.pins is True or not is_numeric:
-                    # List pins
-                    pins = pin_service.list_pins()
-                    for pin in pins:
-                        node = node_service.get_node(pin.node_id)
-                        if node is None:
-                            name = pin.custom_label or "Unknown"
-                            workspace = "Unknown"
-                            res_type = "Unknown"
-                            target = ""
+                # If -p is present without number (or just filters), list matched pins
+                if args.pins is True or not is_numeric or args.pins is None:
+                    for idx, (pin, node) in enumerate(visible_pins):
+                        visible_pos = idx + 1
+                        name = pin.custom_label or node.name
+                        workspace = get_originating_workspace(node_service, node)
+                        res_type = node.resource_type or node.node_kind
+                        target = node.path or ""
+
+                        if args.values:
+                            print(target)
                         else:
-                            name = pin.custom_label or node.name
-                            workspace = get_originating_workspace(node_service, node)
-                            res_type = node.resource_type or node.node_kind
-                            target = node.path or ""
-                        print(f"{pin.position:<3}{name:<22}{workspace:<11}{res_type:<12}{target}")
+                            print(
+                                f"{visible_pos:<3}{name:<22}{workspace:<11}"
+                                f"{res_type:<12}{target}"
+                            )
                     sys.exit(0)
                 else:
                     # Activate pin by its visible position number
-                    try:
-                        pin = pin_service.get_pin_by_position(pos_val)
-                    except PinServiceError as e:
-                        print(f"Error: {e}", file=sys.stderr)
-                        sys.exit(1)
-
-                    node = node_service.get_node(pin.node_id)
-                    if node is None:
-                        print("Error: Pinned node no longer exists.", file=sys.stderr)
-                        sys.exit(1)
-
-                    if node.node_kind in ("workspace", "folder"):
+                    if pos_val < 1 or pos_val > len(visible_pins):
                         print(
-                            f"Error: '{node.name}' is a structural {node.node_kind} node. "
-                            "Structural nodes do not represent filesystem paths and cannot "
-                            "be activated via the CLI. You can navigate to them through "
-                            "the PathTree TUI.",
+                            f"Error: No pin found at position {pos_val}.",
                             file=sys.stderr,
                         )
                         sys.exit(1)
+
+                    pin, node = visible_pins[pos_val - 1]
+
+                    # Value access without activation flag
+                    if args.value:
+                        target = node.path or ""
+                        print(target)
+                        sys.exit(0)
 
                     # Directory resource path output activation
                     if (
@@ -242,8 +331,8 @@ def main() -> None:
                         default_action = provider.get_default_action(context)
                         if not default_action:
                             print(
-                                f"Error: No default action found for node "
-                                f"'{node.name}'.",
+                                "Error: No default action found for "
+                                f"node '{node.name}'.",
                                 file=sys.stderr,
                             )
                             sys.exit(1)
