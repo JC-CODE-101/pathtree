@@ -14,8 +14,8 @@ from pathtree.services.pin_service import PinService
 class PinsScreen(ModalScreen[uuid.UUID | None]):
     """Modal screen displaying global pinned resources.
 
-    Supports wrapping navigation, reordering (via [ and ]),
-    unpinning (via 'u' or 'delete'), and activation to locate/select the
+    Supports wrapping navigation, reordering (via K/Ctrl+Up and J/Ctrl+Down),
+    unpinning (via 'x' / 'u' / 'delete'), and activation to locate/select the
     original node in the tree.
     """
 
@@ -56,12 +56,17 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "close_screen", "Close", show=True),
-        Binding("enter", "activate_pin", "Go to Node", show=True),
+        Binding("q", "close_screen", "Close", show=False),
+        Binding("enter", "activate_pin", "Go", show=True),
         Binding("u", "unpin_selected", "Unpin", show=True),
-        Binding("d", "unpin_selected", "Unpin", show=False),
+        Binding("x", "unpin_selected", "Unpin", show=False),
         Binding("delete", "unpin_selected", "Unpin", show=False),
-        Binding("[", "move_pin_up", "Move Up", show=True),
-        Binding("]", "move_pin_down", "Move Down", show=True),
+        Binding("K", "move_pin_up", "Up", show=True),
+        Binding("shift+k", "move_pin_up", "Up", show=False),
+        Binding("ctrl+up", "move_pin_up", "Up", show=False),
+        Binding("J", "move_pin_down", "Down", show=True),
+        Binding("shift+j", "move_pin_down", "Down", show=False),
+        Binding("ctrl+down", "move_pin_down", "Down", show=False),
     ]
 
     def __init__(self, node_service: NodeService, pin_service: PinService) -> None:
@@ -75,7 +80,7 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
             yield Label("Global Pinned Resources", classes="pins-title")
             yield DataTable(id="pins-table")
             yield Label(
-                "[Enter] Go | [u] Unpin | [[] Up | []] Down | [Esc] Close",
+                "[Enter] Go | [x/u] Unpin | [K/Ctrl+Up] Up | [J/Ctrl+Down] Down | [Esc/q] Close",
                 classes="pins-help",
             )
 
@@ -88,6 +93,7 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
         table.add_column("Type", width=12)
         table.add_column("Resolved Target", width=30)
         self.reload_pins()
+        table.focus()
 
     def _get_originating_workspace(self, node) -> str:
         """Resolve the workspace name of the node by climbing the tree."""
@@ -106,7 +112,7 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
         self._row_node_ids = []
 
         pins = self.pin_service.list_pins()
-        for _idx, pin in enumerate(pins):
+        for pin in pins:
             node = self.node_service.get_node(pin.node_id)
             if node is None:
                 # Skip stale reference in UI
@@ -176,14 +182,12 @@ class PinsScreen(ModalScreen[uuid.UUID | None]):
 
     def on_key(self, event) -> None:
         # Prevent key leakage to parent screen
-        if event.key == "escape":
+        key = event.key.lower()
+        if key in ("escape", "q"):
             event.prevent_default()
             event.stop()
             self.action_close_screen()
-        elif event.key == "enter":
+        elif key == "enter":
             event.prevent_default()
             event.stop()
             self.action_activate_pin()
-        elif event.key in ("u", "d", "delete", "[", "]"):
-            # Stop keys from bubbling out
-            event.stop()

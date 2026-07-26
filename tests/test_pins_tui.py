@@ -31,6 +31,10 @@ async def test_pins_tui_pin_unpin_action_menu(session: Session, tui_services) ->
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
 
+        # Verify initial icon (no pin marker)
+        tree = app.screen.query_one("#tree-view")
+        assert tree.cursor_node.label.icon == "◆"
+
         # 1. Open action menu on the workspace node
         await pilot.press("O")
         await pilot.pause(0.05)
@@ -44,6 +48,9 @@ async def test_pins_tui_pin_unpin_action_menu(session: Session, tui_services) ->
         assert app.screen.id == "main-screen"
         assert pin_service.is_pinned(ws.id) is True
 
+        # Verify pin marker is prepended to the icon
+        assert tree.cursor_node.label.icon == "📌 ◆"
+
         # 2. Open action menu again and verify "Unpin Node" is displayed
         await pilot.press("O")
         await pilot.pause(0.05)
@@ -56,6 +63,9 @@ async def test_pins_tui_pin_unpin_action_menu(session: Session, tui_services) ->
         # Verify it unpinned successfully
         assert app.screen.id == "main-screen"
         assert pin_service.is_pinned(ws.id) is False
+
+        # Verify pin marker is removed
+        assert tree.cursor_node.label.icon == "◆"
 
 
 @pytest.mark.asyncio
@@ -91,8 +101,8 @@ async def test_pins_screen_display_navigation_reorder(
 
         # 1. Test reordering: move ws (row 0) down
         # Pins initially: [ws, fol]
-        # Pressing ']' moves current highlighted row (0) down
-        await pilot.press("]")
+        # Pressing 'J' moves current highlighted row (0) down
+        await pilot.press("J")
         await pilot.pause(0.05)
 
         # Pins should now be: [fol, ws]

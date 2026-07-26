@@ -139,10 +139,14 @@ def main() -> None:
                         if node is None:
                             name = pin.custom_label or "Unknown"
                             workspace = "Unknown"
+                            res_type = "Unknown"
+                            target = ""
                         else:
                             name = pin.custom_label or node.name
                             workspace = get_originating_workspace(node_service, node)
-                        print(f"{pin.position:<3}{name:<19}{workspace:<12}")
+                            res_type = node.resource_type or node.node_kind
+                            target = node.path or ""
+                        print(f"{pin.position:<3}{name:<22}{workspace:<11}{res_type:<12}{target}")
                     sys.exit(0)
                 else:
                     # Activate pin by its visible position number
@@ -155,6 +159,16 @@ def main() -> None:
                     node = node_service.get_node(pin.node_id)
                     if node is None:
                         print("Error: Pinned node no longer exists.", file=sys.stderr)
+                        sys.exit(1)
+
+                    if node.node_kind in ("workspace", "folder"):
+                        print(
+                            f"Error: '{node.name}' is a structural {node.node_kind} node. "
+                            "Structural nodes do not represent filesystem paths and cannot "
+                            "be activated via the CLI. You can navigate to them through "
+                            "the PathTree TUI.",
+                            file=sys.stderr,
+                        )
                         sys.exit(1)
 
                     # Directory resource path output activation

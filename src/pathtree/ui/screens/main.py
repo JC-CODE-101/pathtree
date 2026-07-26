@@ -331,11 +331,11 @@ class MainScreen(Screen[None]):
                 if result.action_id == "pin_node":
                     self.pin_service.pin_node(node.id)
                     self.app.notify(f'Pinned "{node.name}" globally')
-                    self.call_after_refresh(self._update_details_and_selection)
+                    self.refresh_tree(selected_node_id=node.id)
                 elif result.action_id == "unpin_node":
                     self.pin_service.unpin_node(node.id)
                     self.app.notify(f'Unpinned "{node.name}"')
-                    self.call_after_refresh(self._update_details_and_selection)
+                    self.refresh_tree(selected_node_id=node.id)
                 else:
                     if provider and context:
                         self.execute_action(result.action_id, provider, context)

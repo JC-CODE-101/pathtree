@@ -55,8 +55,8 @@ def test_cli_pin_and_list_pins(cli_session, capsys) -> None:
         assert excinfo.value.code == 0
 
     captured = capsys.readouterr()
-    # Expected format: Position  Name/Label  Workspace
-    assert "1  My Workspace       My Workspace" in captured.out
+    # Expected format: Position  Name/Label  Workspace  Type  Target
+    assert "1  My Workspace          My Workspaceworkspace" in captured.out
 
 
 def test_cli_pin_invalid_uuid(cli_session, capsys) -> None:
@@ -127,7 +127,26 @@ def test_cli_unpin_and_compaction(cli_session, capsys) -> None:
         assert excinfo.value.code == 0
 
     captured = capsys.readouterr()
-    assert "1  Node B             Node B" in captured.out
+    assert "1  Node B                Node B     workspace" in captured.out
+
+
+def test_cli_structural_activation_error(cli_session, capsys) -> None:
+    """Verify activating a structural Workspace/Folder pin returns exit code 1."""
+    node_repo = NodeRepository(cli_session)
+    ws = node_repo.create(Node(name="My Workspace", node_kind="workspace"))
+
+    pin_repo = PinRepository(cli_session)
+    pin_service = PinService(node_repo, pin_repo)
+    pin_service.pin_node(ws.id)
+
+    with patch("sys.argv", ["pathtree", "-p", "1"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 1
+
+    captured = capsys.readouterr()
+    assert "is a structural workspace node" in captured.err
+    assert "You can navigate to them through the PathTree TUI" in captured.err
 
 
 def test_cli_unpin_invalid_position(cli_session, capsys) -> None:
