@@ -45,6 +45,16 @@ class ScriptActionProvider(ResourceActionProvider):
                 description="Open this script in your configured editor",
             ),
             ResourceAction(
+                id="create_launch_profile",
+                label="Create Launch Profile",
+                description="Create a launch profile for this script",
+            ),
+            ResourceAction(
+                id="view_launch_profiles",
+                label="View Launch Profiles",
+                description="View launch profiles for this script",
+            ),
+            ResourceAction(
                 id="copy_path",
                 label="Copy Path",
                 description="Copy script path to clipboard",
@@ -92,7 +102,14 @@ class ScriptActionProvider(ResourceActionProvider):
 
         path_obj = Path(resolved_path)
 
-        if action_id == "run_script":
+        if action_id in ("create_launch_profile", "view_launch_profiles"):
+            return ResourceActionResult(
+                success=True,
+                exit_app=False,
+                target=ResourceActionResultTarget.NONE,
+            )
+
+        elif action_id == "run_script":
             try:
                 argv = resolve_script_argv(path_obj)
             except ScriptResolutionError as e:

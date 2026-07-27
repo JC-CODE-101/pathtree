@@ -43,7 +43,7 @@ def test_sqlite_pragmas(engine):
 
 
 def test_user_version():
-    """Test user_version is correctly queried and set to 3."""
+    """Test user_version is correctly queried and set to 4."""
     # Use a temp file to ensure clean initialization behavior
     fd, temp_path_str = tempfile.mkstemp()
     os.close(fd)
@@ -57,7 +57,7 @@ def test_user_version():
         with Session(engine) as session:
             connection = session.connection()
             version = connection.execute(text("PRAGMA user_version;")).scalar()
-            assert version == 3
+            assert version == 4
 
             # Check that table exists
             cursor = connection.execute(
@@ -68,12 +68,12 @@ def test_user_version():
             )
             assert cursor.first() is not None
 
-        # Re-run init_db and ensure version is still 3
+        # Re-run init_db and ensure version is still 4
         init_db(engine)
         with Session(engine) as session:
             connection = session.connection()
             version = connection.execute(text("PRAGMA user_version;")).scalar()
-            assert version == 3
+            assert version == 4
 
     finally:
         if temp_path.exists():

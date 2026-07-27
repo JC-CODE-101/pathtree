@@ -196,6 +196,62 @@ The default Unicode symbol for Executable resources is `⚙` (Gear), with custom
 
 ---
 
+# Launch Profile
+
+Purpose
+
+Represents a reusable execution profile for an existing Script or Executable node.
+
+Examples
+
+- Blender Normal
+- Blender Factory Startup
+- Blender Debug
+
+Semantics
+
+A Launch Profile resource represents a specific configuration (arguments, working directory, and terminal mode) to launch a Script or Executable.
+
+Hierarchy Rules
+
+- Launch Profile resources may be children of:
+  - System Group ("Launch Profiles" or "Detached Profiles")
+- Launch Profile resources may **not** be parent nodes to any other node.
+
+Icon & Customization
+
+The default Unicode symbol for Launch Profile resources is `▶` (Play symbol). When Nerd Fonts are enabled, the default icon is `󰓅` (Accent Workspace).
+
+---
+
+# System Group
+
+Purpose
+
+A system-managed group of nodes with a stable internal role that is decoupled from its visible label.
+
+Examples
+
+- **Launch Profiles** (`system_role: launch_profiles`)
+- **Detached Profiles** (`system_role: detached_launch_profiles`)
+
+Semantics
+
+System Groups are structural containers generated and managed lazily by the application under a Workspace. They are used for special system behaviors like organizing launch profiles.
+
+Hierarchy Rules
+
+- System Groups may be children of:
+  - Workspace
+- System Groups may contain:
+  - Launch Profile nodes
+
+Icon & Customization
+
+The default Unicode symbol for "Launch Profiles" system group is `⚙` (Gear), and for "Detached Profiles" is `⚠` (Warning). When Nerd Fonts are enabled, they are `󰒓` and `󰅚` respectively.
+
+---
+
 # URL
 
 Purpose

@@ -100,8 +100,137 @@ def main() -> None:
             "instead of formatting a table."
         ),
     )
+    parser.add_argument(
+        "--profiles",
+        action="store_true",
+        help="List all active and detached launch profiles.",
+    )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        help="Run a launch profile by its visible numeric position.",
+    )
+    override_group = parser.add_mutually_exclusive_group()
+    override_group.add_argument(
+        "--here",
+        action="store_true",
+        help="Override the profile execution to run in the current terminal context.",
+    )
+    override_group.add_argument(
+        "--new-terminal",
+        action="store_true",
+        help="Override the profile execution to run in a new terminal window.",
+    )
 
     args = parser.parse_args()
+
+    # Reject overrides when --profile is not supplied
+    if (args.here or args.new_terminal) and args.profile is None:
+        parser.error("argument --here or --new-terminal is only allowed with --profile")
+
+    # CLI Launch Profile list or execution
+    if args.profiles or args.profile is not None:
+        with get_session() as session:
+            node_repo = NodeRepository(session)
+            node_service = NodeService(node_repo)
+
+            from pathtree.database.repository import LaunchProfileRepository
+            from pathtree.services.launch_profile_service import (
+                LaunchProfileService,
+                LaunchProfileServiceError,
+            )
+
+            lp_repo = LaunchProfileRepository(session)
+            lp_service = LaunchProfileService(node_service, lp_repo)
+
+            # Retrieve all launch profile nodes deterministically sorted
+            all_nodes = node_service.repository.list_all()
+            profile_nodes = [
+                node
+                for node in all_nodes
+                if node.node_kind == "resource"
+                and node.resource_type == "launch_profile"
+            ]
+
+            visible_profiles = []
+            for node in profile_nodes:
+                try:
+                    profile = lp_service.get_profile_for_node(node.id)
+                    visible_profiles.append((profile, node))
+                except Exception:
+                    pass
+
+            # 1. List launch profiles
+            if args.profiles:
+                for idx, (profile, node) in enumerate(visible_profiles):
+                    visible_pos = idx + 1
+                    name = node.name
+                    workspace = get_originating_workspace(node_service, node)
+
+                    status = profile.status
+                    res_type = profile.target_resource_type
+
+                    if profile.target_node_id:
+                        t_node = node_service.get_node(profile.target_node_id)
+                        target_name = t_node.name if t_node else "Unknown"
+                    else:
+                        target_name = profile.previous_target_name or "None"
+
+                    print(
+                        f"{visible_pos:<5}{name:<25}{workspace:<15}"
+                        f"{target_name:<20}{res_type:<12}{status}"
+                    )
+                sys.exit(0)
+
+            # 2. Run launch profile
+            if args.profile is not None:
+                try:
+                    pos = int(args.profile)
+                    if pos < 1:
+                        raise ValueError
+                except ValueError:
+                    print(
+                        "Error: Invalid profile position. Must be a positive integer.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+                if pos > len(visible_profiles):
+                    print(
+                        f"Error: Invalid profile position {pos}. "
+                        "No profile found at that position.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+                profile, node = visible_profiles[pos - 1]
+
+                # Verify active status
+                if profile.status != "active":
+                    print(
+                        f'Error: Launch Profile "{node.name}" is detached.\n'
+                        "Reconnect a compatible executable before running it.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+                # Determine terminal mode override
+                terminal_mode_override = None
+                if args.here:
+                    terminal_mode_override = "inherit"
+                elif args.new_terminal:
+                    terminal_mode_override = "new_terminal"
+
+                # Execute profile
+                try:
+                    lp_service.execute_profile(
+                        profile.id, terminal_mode_override=terminal_mode_override
+                    )
+                    print(f"Launched profile: {node.name}")
+                    sys.exit(0)
+                except LaunchProfileServiceError as e:
+                    print(f"Error: {e}", file=sys.stderr)
+                    sys.exit(1)
 
     if args.seed_dev:
         with get_session() as session:
