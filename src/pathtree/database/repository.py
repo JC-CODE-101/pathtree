@@ -6,6 +6,7 @@ from sqlmodel import Session, select
 
 from pathtree.database.errors import RepositoryError, RepositoryIntegrityError
 from pathtree.models.launch_profile import LaunchProfile
+from pathtree.models.multi_launcher import MultiLauncher, MultiLauncherItem
 from pathtree.models.node import Node
 from pathtree.models.pin import Pin
 
@@ -311,6 +312,157 @@ class PinRepository:
         statement = select(Pin).order_by(Pin.position.desc())
         pin = self.session.exec(statement).first()
         return pin.position if pin else 0
+
+
+class MultiLauncherRepository:
+    """Repository for managing MultiLauncher persistence."""
+
+    def __init__(self, session: Session) -> None:
+        """Initialize the repository with a database session."""
+        self.session = session
+
+    def create(self, launcher: MultiLauncher) -> MultiLauncher:
+        """Create a new MultiLauncher in the database."""
+        try:
+            self.session.add(launcher)
+            self.session.commit()
+            self.session.refresh(launcher)
+            return launcher
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
+
+    def get_by_id(self, id: uuid.UUID) -> MultiLauncher | None:
+        """Retrieve a MultiLauncher by its UUID."""
+        return self.session.get(MultiLauncher, id)
+
+    def get_by_launcher_node_id(
+        self, launcher_node_id: uuid.UUID
+    ) -> MultiLauncher | None:
+        """Retrieve a MultiLauncher by its node UUID."""
+        statement = select(MultiLauncher).where(
+            MultiLauncher.launcher_node_id == launcher_node_id
+        )
+        return self.session.exec(statement).first()
+
+    def list_all(self) -> Sequence[MultiLauncher]:
+        """Retrieve all MultiLauncher records."""
+        statement = select(MultiLauncher)
+        return self.session.exec(statement).all()
+
+    def list_by_workspace(self, workspace_id: uuid.UUID) -> Sequence[MultiLauncher]:
+        """Retrieve all MultiLauncher records belonging to a workspace."""
+        statement = select(MultiLauncher).where(
+            MultiLauncher.workspace_id == workspace_id
+        )
+        return self.session.exec(statement).all()
+
+    def update(self, launcher: MultiLauncher) -> MultiLauncher:
+        """Update an existing MultiLauncher in the database."""
+        from datetime import UTC, datetime
+
+        launcher.updated_at = datetime.now(UTC)
+        try:
+            self.session.add(launcher)
+            self.session.commit()
+            self.session.refresh(launcher)
+            return launcher
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
+
+    def delete(self, id: uuid.UUID) -> bool:
+        """Delete a MultiLauncher by its UUID."""
+        launcher = self.get_by_id(id)
+        if launcher:
+            try:
+                self.session.delete(launcher)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
+        return False
+
+    def create_item(self, item: MultiLauncherItem) -> MultiLauncherItem:
+        """Create a new MultiLauncherItem in the database."""
+        try:
+            self.session.add(item)
+            self.session.commit()
+            self.session.refresh(item)
+            return item
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
+
+    def get_item_by_id(self, item_id: uuid.UUID) -> MultiLauncherItem | None:
+        """Retrieve a MultiLauncherItem by its UUID."""
+        return self.session.get(MultiLauncherItem, item_id)
+
+    def list_items_for_launcher(
+        self, launcher_id: uuid.UUID
+    ) -> list[MultiLauncherItem]:
+        """Retrieve all items for a MultiLauncher sorted by position."""
+        statement = (
+            select(MultiLauncherItem)
+            .where(MultiLauncherItem.multi_launcher_id == launcher_id)
+            .order_by(MultiLauncherItem.position)
+        )
+        return list(self.session.exec(statement).all())
+
+    def update_item(self, item: MultiLauncherItem) -> MultiLauncherItem:
+        """Update a MultiLauncherItem."""
+        try:
+            self.session.add(item)
+            self.session.commit()
+            self.session.refresh(item)
+            return item
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
+
+    def delete_item(self, item_id: uuid.UUID) -> bool:
+        """Delete a MultiLauncherItem by ID."""
+        item = self.get_item_by_id(item_id)
+        if item:
+            try:
+                self.session.delete(item)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
+        return False
 
 
 class LaunchProfileRepository:

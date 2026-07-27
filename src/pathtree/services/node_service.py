@@ -389,6 +389,8 @@ class NodeService:
             valid = True
         elif kind == "resource" and res_type == "launch_profile":
             valid = True
+        elif kind == "resource" and res_type == "multi_launcher":
+            valid = True
 
         if not valid:
             raise ValidationError(
@@ -849,7 +851,32 @@ class NodeService:
                     ):
                         profile = launch_profile_repo.get_by_profile_node_id(nid)
                         if profile:
+                            # Delete referencing MultiLauncherItems to avoid foreign key violations
+                            from sqlmodel import delete
+
+                            from pathtree.models.multi_launcher import MultiLauncherItem
+
+                            try:
+                                statement = delete(MultiLauncherItem).where(
+                                    MultiLauncherItem.launch_profile_id == profile.id
+                                )
+                                self.repository.session.exec(statement)
+                                self.repository.session.flush()
+                            except Exception:
+                                pass
                             launch_profile_repo.delete(profile.id)
+
+                    # 3b. If a multi launcher node is itself deleted, delete its multi launcher record
+                    if (
+                        target_node.node_kind == "resource"
+                        and target_node.resource_type == "multi_launcher"
+                    ):
+                        from pathtree.database.repository import MultiLauncherRepository
+
+                        ml_repo = MultiLauncherRepository(self.repository.session)
+                        launcher = ml_repo.get_by_launcher_node_id(nid)
+                        if launcher:
+                            ml_repo.delete(launcher.id)
 
             self.repository.delete_recursive(node_id)
 
