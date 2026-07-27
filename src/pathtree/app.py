@@ -110,6 +110,16 @@ def main() -> None:
         type=str,
         help="Run a launch profile by its visible numeric position.",
     )
+    parser.add_argument(
+        "--here",
+        action="store_true",
+        help="Override the profile execution to run in the current terminal context.",
+    )
+    parser.add_argument(
+        "--new-terminal",
+        action="store_true",
+        help="Override the profile execution to run in a new terminal window.",
+    )
 
     args = parser.parse_args()
 
@@ -199,9 +209,18 @@ def main() -> None:
                     )
                     sys.exit(1)
 
+                # Determine terminal mode override
+                terminal_mode_override = None
+                if args.here:
+                    terminal_mode_override = "inherit"
+                elif args.new_terminal:
+                    terminal_mode_override = "new_terminal"
+
                 # Execute profile
                 try:
-                    lp_service.execute_profile(profile.id)
+                    lp_service.execute_profile(
+                        profile.id, terminal_mode_override=terminal_mode_override
+                    )
                     print(f"Launched profile: {node.name}")
                     sys.exit(0)
                 except LaunchProfileServiceError as e:

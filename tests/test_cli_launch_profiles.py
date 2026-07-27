@@ -190,3 +190,83 @@ def test_cli_invalid_position_rejected(cli_session, capsys) -> None:
         "Error: Invalid profile position 99. No profile found at that position."
         in captured.err
     )
+
+
+@patch("pathtree.services.launch_profile_service.LaunchProfileService.execute_profile")
+def test_cli_terminal_mode_override_here(mock_execute, cli_session, capsys) -> None:
+    from unittest import mock
+
+    from pathtree.services.node_service import NodeService
+
+    mock_execute.return_value = MagicMock(success=True, pid=456)
+
+    node_repo = NodeRepository(cli_session)
+    lp_repo = LaunchProfileRepository(cli_session)
+    lp_service = LaunchProfileService(NodeService(node_repo), lp_repo)
+
+    ws = node_repo.create(Node(name="Workspace X", node_kind="workspace"))
+    script_node = node_repo.create(
+        Node(
+            name="My Script",
+            node_kind="resource",
+            resource_type="script",
+            parent_id=ws.id,
+            path=__file__,
+        )
+    )
+
+    lp_service.create_profile(
+        name="Blender Run",
+        target_node_id=script_node.id,
+        arguments=["--play"],
+    )
+
+    # Run profile position 1 with --here
+    with patch("sys.argv", ["pathtree", "--profile", "1", "--here"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    mock_execute.assert_called_once_with(mock.ANY, terminal_mode_override="inherit")
+
+
+@patch("pathtree.services.launch_profile_service.LaunchProfileService.execute_profile")
+def test_cli_terminal_mode_override_new_terminal(
+    mock_execute, cli_session, capsys
+) -> None:
+    from unittest import mock
+
+    from pathtree.services.node_service import NodeService
+
+    mock_execute.return_value = MagicMock(success=True, pid=456)
+
+    node_repo = NodeRepository(cli_session)
+    lp_repo = LaunchProfileRepository(cli_session)
+    lp_service = LaunchProfileService(NodeService(node_repo), lp_repo)
+
+    ws = node_repo.create(Node(name="Workspace X", node_kind="workspace"))
+    script_node = node_repo.create(
+        Node(
+            name="My Script",
+            node_kind="resource",
+            resource_type="script",
+            parent_id=ws.id,
+            path=__file__,
+        )
+    )
+
+    lp_service.create_profile(
+        name="Blender Run",
+        target_node_id=script_node.id,
+        arguments=["--play"],
+    )
+
+    # Run profile position 1 with --new-terminal
+    with patch("sys.argv", ["pathtree", "--profile", "1", "--new-terminal"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 0
+
+    mock_execute.assert_called_once_with(
+        mock.ANY, terminal_mode_override="new_terminal"
+    )

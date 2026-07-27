@@ -142,10 +142,7 @@ class EditProfileDialog(ModalScreen[bool]):
             with Vertical(classes="field-container"):
                 yield Label("Working Directory", classes="field-label")
                 initial_wd = None
-                if self.profile and any(
-                    choice[1] == self.profile.working_directory_node_id
-                    for choice in wd_choices
-                ):
+                if self.profile:
                     initial_wd = self.profile.working_directory_node_id
                 yield Select(
                     wd_choices,

@@ -58,11 +58,6 @@ class LaunchProfileActionProvider(ResourceActionProvider):
                 description="Reconnect profile to a compatible target",
             ),
             ResourceAction(
-                id="duplicate_profile",
-                label="Duplicate Profile",
-                description="Duplicate this launch profile cleanly",
-            ),
-            ResourceAction(
                 id="view_details",
                 label="View Details",
                 description="Show launch profile execution details",
@@ -140,23 +135,6 @@ class LaunchProfileActionProvider(ResourceActionProvider):
                 exit_app=False,
                 target=ResourceActionResultTarget.NONE,
             )
-
-        elif action_id == "duplicate_profile":
-            try:
-                dup = self._launch_profile_service.duplicate_profile(profile.id)
-                dup_node = self._node_service.get_node(dup.profile_node_id)
-                dup_name = dup_node.name if dup_node else "Duplicated Profile"
-                return ResourceActionResult(
-                    success=True,
-                    exit_app=False,
-                    message=f"Duplicated profile successfully as '{dup_name}'.",
-                    target=ResourceActionResultTarget.NOTIFICATION,
-                )
-            except LaunchProfileServiceError as e:
-                return ResourceActionResult(
-                    success=False,
-                    error_message=str(e),
-                )
 
         elif action_id == "view_details":
             # Build details view string
