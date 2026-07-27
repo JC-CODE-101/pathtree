@@ -182,9 +182,14 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
             with Vertical(classes="field-container", id="parent-field-container"):
                 yield Label("Parent", classes="field-label")
+                initial_parent_id = None
+                if any(
+                    choice[1] == self.default_parent_id for choice in parent_choices
+                ):
+                    initial_parent_id = self.default_parent_id
                 yield Select(
                     parent_choices,
-                    value=self.default_parent_id,
+                    value=initial_parent_id,
                     allow_blank=False,
                     id="select-parent",
                 )

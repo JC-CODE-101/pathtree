@@ -514,6 +514,20 @@ class MainScreen(Screen[None]):
                 details_panel.update_error(str(e))
             return
 
+        elif action_id == "duplicate_profile":
+            tree = self.query_one("#tree-view", NodeTreeView)
+            result = provider.execute(action_id, context)
+            if result.success:
+                if result.message:
+                    self.app.notify(result.message)
+                self.refresh_tree()
+                tree.focus()
+            else:
+                details_panel.update_error(
+                    result.error_message or "Duplication failed."
+                )
+            return
+
         result = provider.execute(action_id, context)
         if not result.success:
             err = result.error_message or "Action execution failed."
@@ -712,6 +726,39 @@ class MainScreen(Screen[None]):
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
         node_id = tree.cursor_node.data
+
+        node = self.node_service.get_node(node_id)
+        if (
+            node is not None
+            and node.node_kind == "resource"
+            and node.resource_type == "launch_profile"
+        ):
+            from pathtree.ui.dialogs.edit_profile import EditProfileDialog
+
+            try:
+                profile = self.launch_profile_service.get_profile_for_node(node_id)
+            except Exception as e:
+                self.query_one("#details-panel").update_error(str(e))
+                return
+
+            def handle_edit_finished_lp(changed: bool) -> None:
+                if changed:
+                    self.app.notify("Launch Profile updated.")
+                    self.refresh_tree(
+                        selected_node_id=node_id,
+                        expanded_node_ids=captured_expanded_node_ids,
+                    )
+                tree.focus()
+
+            self.app.push_screen(
+                EditProfileDialog(
+                    self.node_service,
+                    self.launch_profile_service,
+                    profile_id=profile.id,
+                ),
+                callback=handle_edit_finished_lp,
+            )
+            return
 
         def handle_edit_finished(success: bool) -> None:
             if success:

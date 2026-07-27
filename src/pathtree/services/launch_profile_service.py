@@ -406,3 +406,75 @@ class LaunchProfileService:
             raise ExecutionFailureError(res.error_message or "Process launch failed.")
 
         return res
+
+    def generate_unique_profile_name(
+        self, workspace_id: uuid.UUID, base_name: str
+    ) -> str:
+        """Generate a unique profile node name within the same workspace."""
+        existing_profiles = self.list_profiles_for_workspace(workspace_id)
+        existing_names = set()
+        for p in existing_profiles:
+            p_node = self.node_service.get_node(p.profile_node_id)
+            if p_node:
+                existing_names.add(p_node.name.strip().lower())
+
+        # Generate candidates
+        candidate = f"{base_name} Copy"
+        if candidate.strip().lower() not in existing_names:
+            return candidate
+
+        suffix = 2
+        while True:
+            candidate = f"{base_name} Copy {suffix}"
+            if candidate.strip().lower() not in existing_names:
+                return candidate
+            suffix += 1
+
+    def duplicate_profile(self, profile_id: uuid.UUID) -> LaunchProfile:
+        """Duplicate an existing launch profile (active or detached) cleanly and independently."""
+        orig = self.get_profile(profile_id)
+        orig_node = self.node_service.get_node(orig.profile_node_id)
+        if not orig_node:
+            raise ProfileNotFoundError("Original profile node not found.")
+
+        unique_name = self.generate_unique_profile_name(
+            orig.workspace_id, orig_node.name
+        )
+
+        # Create tree Node first
+        try:
+            parent_group_id = orig_node.parent_id
+            profile_node = self.node_service.create_node(
+                name=unique_name,
+                node_kind="resource",
+                resource_type="launch_profile",
+                parent_id=parent_group_id,
+            )
+        except Exception as e:
+            raise LaunchProfileServiceError(
+                f"Failed to create profile node: {e}"
+            ) from e
+
+        try:
+            profile = LaunchProfile(
+                profile_node_id=profile_node.id,
+                workspace_id=orig.workspace_id,
+                target_node_id=orig.target_node_id,
+                target_resource_type=orig.target_resource_type,
+                arguments=orig.arguments,
+                working_directory_node_id=orig.working_directory_node_id,
+                terminal_mode=orig.terminal_mode,
+                status=orig.status,
+                previous_target_name=orig.previous_target_name,
+                previous_target_path=orig.previous_target_path,
+            )
+            return self.launch_profile_repository.create(profile)
+        except Exception as e:
+            # Clean up the newly created tree node to avoid orphan nodes on failure
+            try:
+                self.node_service.delete_node(profile_node.id, recursive=True)
+            except Exception:
+                pass
+            raise LaunchProfileServiceError(
+                f"Failed to persist duplicated launch profile: {e}"
+            ) from e
