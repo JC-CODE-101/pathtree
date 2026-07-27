@@ -110,18 +110,23 @@ def main() -> None:
         type=str,
         help="Run a launch profile by its visible numeric position.",
     )
-    parser.add_argument(
+    override_group = parser.add_mutually_exclusive_group()
+    override_group.add_argument(
         "--here",
         action="store_true",
         help="Override the profile execution to run in the current terminal context.",
     )
-    parser.add_argument(
+    override_group.add_argument(
         "--new-terminal",
         action="store_true",
         help="Override the profile execution to run in a new terminal window.",
     )
 
     args = parser.parse_args()
+
+    # Reject overrides when --profile is not supplied
+    if (args.here or args.new_terminal) and args.profile is None:
+        parser.error("argument --here or --new-terminal is only allowed with --profile")
 
     # CLI Launch Profile list or execution
     if args.profiles or args.profile is not None:

@@ -270,3 +270,38 @@ def test_cli_terminal_mode_override_new_terminal(
     mock_execute.assert_called_once_with(
         mock.ANY, terminal_mode_override="new_terminal"
     )
+
+
+def test_cli_terminal_mode_override_mutually_exclusive(cli_session, capsys) -> None:
+    # Reject passing both overrides simultaneously
+    with patch("sys.argv", ["pathtree", "--profile", "1", "--here", "--new-terminal"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 2
+
+    captured = capsys.readouterr()
+    assert "not allowed with argument" in captured.err
+
+
+def test_cli_terminal_mode_override_no_profile_here(cli_session, capsys) -> None:
+    # Reject passing --here without --profile
+    with patch("sys.argv", ["pathtree", "--here"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 2
+
+    captured = capsys.readouterr()
+    assert "only allowed with --profile" in captured.err
+
+
+def test_cli_terminal_mode_override_no_profile_new_terminal(
+    cli_session, capsys
+) -> None:
+    # Reject passing --new-terminal without --profile
+    with patch("sys.argv", ["pathtree", "--new-terminal"]):
+        with pytest.raises(SystemExit) as excinfo:
+            main()
+        assert excinfo.value.code == 2
+
+    captured = capsys.readouterr()
+    assert "only allowed with --profile" in captured.err
