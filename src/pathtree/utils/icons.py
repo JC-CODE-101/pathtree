@@ -40,6 +40,7 @@ def classify_node_type(node_kind: str, resource_type: str | None) -> str:
             "executable",
             "url",
             "launch_profile",
+            "multi_launcher",
         ):
             return resource_type or "directory"
         return resource_type or "directory"
@@ -110,6 +111,14 @@ UNICODE_SAFE_PACK = {
             IconOption("➔", "Right Arrow"),
         ],
     },
+    "multi_launcher": {
+        "default": IconOption("⚏", "Multi Launcher"),
+        "options": [
+            IconOption("⚏", "Multi Launcher"),
+            IconOption("⧉", "Double Square"),
+            IconOption("☰", "List"),
+        ],
+    },
 }
 
 
@@ -177,6 +186,14 @@ NERD_FONTS_PACK = {
             IconOption("󰄖", "Arrow URL"),
         ],
     },
+    "multi_launcher": {
+        "default": IconOption("󱓞", "Multi Launcher"),
+        "options": [
+            IconOption("󱓞", "Multi Launcher"),
+            IconOption("󰓅", "Rocket"),
+            IconOption("󰒓", "Gear"),
+        ],
+    },
 }
 
 
@@ -222,6 +239,8 @@ class IconRegistry:
         self.register_resource_icon("launch_profile", "󰓅", "▶")
         self.register_resource_icon("launch_profiles", "󰒓", "⚙")
         self.register_resource_icon("detached_launch_profiles", "󰅚", "⚠")
+        self.register_resource_icon("multi_launcher", "󱓞", "⚏")
+        self.register_resource_icon("multi_launchers", "󰒓", "⚙")
 
         # 2. File extension defaults
         self.register_extension_icon(".py", "󰌠", "▤")

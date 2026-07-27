@@ -34,7 +34,8 @@ class MainScreen(Screen[None]):
     CSS = """
     SearchInput {
         dock: top;
-        margin-bottom: 1;
+        height: 3;
+        margin-bottom: 0;
     }
     Horizontal {
         height: 1fr;
@@ -100,6 +101,22 @@ class MainScreen(Screen[None]):
         else:
             self.launch_profile_service = None
 
+        # Initialize Multi Launcher Service
+        if (
+            hasattr(self.node_service, "repository")
+            and self.node_service.repository is not None
+            and self.launch_profile_service is not None
+        ):
+            from pathtree.database.repository import MultiLauncherRepository
+            from pathtree.services.multi_launcher_service import MultiLauncherService
+
+            ml_repo = MultiLauncherRepository(self.node_service.repository.session)
+            self.multi_launcher_service = MultiLauncherService(
+                self.node_service, self.launch_profile_service, ml_repo
+            )
+        else:
+            self.multi_launcher_service = None
+
         # Initialize Action Registry and Register Providers
         self.action_registry = ResourceActionRegistry()
         self.action_registry.register(
@@ -134,6 +151,17 @@ class MainScreen(Screen[None]):
                 "launch_profile",
                 LaunchProfileActionProvider(
                     self.node_service, self.launch_profile_service
+                ),
+            )
+
+        if self.multi_launcher_service:
+            from pathtree.actions.multi_launcher import MultiLauncherActionProvider
+
+            self.action_registry.register(
+                "resource",
+                "multi_launcher",
+                MultiLauncherActionProvider(
+                    self.node_service, self.multi_launcher_service
                 ),
             )
 
@@ -508,6 +536,64 @@ class MainScreen(Screen[None]):
                 )
                 self.launch_profile_service.delete_profile(profile.id)
                 self.app.notify("Launch Profile deleted.")
+                self.refresh_tree()
+                tree.focus()
+            except Exception as e:
+                details_panel.update_error(str(e))
+            return
+
+        elif action_id == "edit_launcher":
+            from pathtree.ui.dialogs.edit_multi_launcher import EditMultiLauncherDialog
+
+            tree = self.query_one("#tree-view", NodeTreeView)
+            try:
+                launcher = self.multi_launcher_service.get_launcher_for_node(
+                    context.node.id
+                )
+
+                def handle_edit_finished(changed: bool) -> None:
+                    if changed:
+                        self.app.notify("Multi Launcher updated.")
+                        self.refresh_tree(selected_node_id=context.node.id)
+                    tree.focus()
+
+                self.app.push_screen(
+                    EditMultiLauncherDialog(
+                        self.node_service,
+                        self.launch_profile_service,
+                        self.multi_launcher_service,
+                        launcher_id=launcher.id,
+                    ),
+                    callback=handle_edit_finished,
+                )
+            except Exception as e:
+                details_panel.update_error(str(e))
+            return
+
+        elif action_id == "duplicate_launcher":
+            tree = self.query_one("#tree-view", NodeTreeView)
+            try:
+                launcher = self.multi_launcher_service.get_launcher_for_node(
+                    context.node.id
+                )
+                new_launcher = self.multi_launcher_service.duplicate_launcher(
+                    launcher.id
+                )
+                self.app.notify(f"Duplicated Multi Launcher '{context.node.name}'")
+                self.refresh_tree(selected_node_id=new_launcher.launcher_node_id)
+                tree.focus()
+            except Exception as e:
+                details_panel.update_error(str(e))
+            return
+
+        elif action_id == "delete_launcher":
+            tree = self.query_one("#tree-view", NodeTreeView)
+            try:
+                launcher = self.multi_launcher_service.get_launcher_for_node(
+                    context.node.id
+                )
+                self.multi_launcher_service.delete_launcher(launcher.id)
+                self.app.notify("Multi Launcher deleted.")
                 self.refresh_tree()
                 tree.focus()
             except Exception as e:

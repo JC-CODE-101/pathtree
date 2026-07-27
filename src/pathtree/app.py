@@ -110,6 +110,16 @@ def main() -> None:
         type=str,
         help="Run a launch profile by its visible numeric position.",
     )
+    parser.add_argument(
+        "--multi-launchers",
+        action="store_true",
+        help="List all multi launchers.",
+    )
+    parser.add_argument(
+        "--multi-launcher",
+        type=str,
+        help="Run a multi launcher by its visible numeric position.",
+    )
     override_group = parser.add_mutually_exclusive_group()
     override_group.add_argument(
         "--here",
@@ -127,6 +137,96 @@ def main() -> None:
     # Reject overrides when --profile is not supplied
     if (args.here or args.new_terminal) and args.profile is None:
         parser.error("argument --here or --new-terminal is only allowed with --profile")
+
+    # CLI Multi Launcher list or execution
+    if args.multi_launchers or args.multi_launcher is not None:
+        with get_session() as session:
+            node_repo = NodeRepository(session)
+            node_service = NodeService(node_repo)
+
+            from pathtree.database.repository import (
+                LaunchProfileRepository,
+                MultiLauncherRepository,
+            )
+            from pathtree.services.launch_profile_service import LaunchProfileService
+            from pathtree.services.multi_launcher_service import (
+                MultiLauncherService,
+            )
+
+            lp_repo = LaunchProfileRepository(session)
+            lp_service = LaunchProfileService(node_service, lp_repo)
+            ml_repo = MultiLauncherRepository(session)
+            ml_service = MultiLauncherService(node_service, lp_service, ml_repo)
+
+            # Retrieve all multi launcher nodes deterministically sorted
+            all_nodes = node_service.repository.list_all()
+            ml_nodes = [
+                node
+                for node in all_nodes
+                if node.node_kind == "resource"
+                and node.resource_type == "multi_launcher"
+            ]
+
+            visible_launchers = []
+            for node in ml_nodes:
+                try:
+                    launcher = ml_service.get_launcher_for_node(node.id)
+                    visible_launchers.append((launcher, node))
+                except Exception:
+                    pass
+
+            # Deterministic sorting: sort by parent_id, sort_order, created_at
+            visible_launchers.sort(
+                key=lambda x: (
+                    x[1].parent_id or uuid.UUID(int=0),
+                    x[1].sort_order,
+                    x[1].created_at,
+                )
+            )
+
+            # 1. List multi launchers
+            if args.multi_launchers:
+                for idx, (launcher, node) in enumerate(visible_launchers):
+                    visible_pos = idx + 1
+                    name = node.name
+                    workspace = get_originating_workspace(node_service, node)
+                    desc = launcher.description or ""
+
+                    print(f"{visible_pos:<5}{name:<25}{workspace:<15}{desc}")
+                sys.exit(0)
+
+            # 2. Run multi launcher
+            if args.multi_launcher is not None:
+                try:
+                    pos = int(args.multi_launcher)
+                    if pos < 1:
+                        raise ValueError
+                except ValueError:
+                    print(
+                        "Error: Invalid multi launcher position. "
+                        "Must be a positive integer.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+                if pos > len(visible_launchers):
+                    print(
+                        f"Error: Invalid multi launcher position {pos}. "
+                        "No multi launcher found at that position.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+
+                launcher, node = visible_launchers[pos - 1]
+
+                # Execute multi launcher
+                try:
+                    ml_service.execute_launcher(launcher.id)
+                    print(f"Launched multi launcher: {node.name}")
+                    sys.exit(0)
+                except Exception as e:
+                    print(f"Error: {e}", file=sys.stderr)
+                    sys.exit(1)
 
     # CLI Launch Profile list or execution
     if args.profiles or args.profile is not None:

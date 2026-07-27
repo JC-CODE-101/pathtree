@@ -7,6 +7,10 @@ from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine, text
 
 from pathtree.models.launch_profile import LaunchProfile  # noqa: F401
+from pathtree.models.multi_launcher import (  # noqa: F401
+    MultiLauncher,
+    MultiLauncherItem,
+)
 
 # Ensure models are imported so they register on SQLModel.metadata
 from pathtree.models.node import Node  # noqa: F401
@@ -51,16 +55,17 @@ def create_db_engine(db_path: Path) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Query user_version, generate tables if needed, and migrate to version 4.
+    """Query user_version, generate tables if needed, and migrate to version 5.
 
-    If the database reports user_version > 4, we refuse startup with
+    If the database reports user_version > 5, we refuse startup with
     UnsupportedDatabaseVersionError.
-    Fresh database creates tables directly at version 4.
+    Fresh database creates tables directly at version 5.
     An existing version 1 (or 0) database is migrated transactionally to
-    version 2, then to 3, and then to 4.
-    An existing version 2 database is migrated transactionally to version 3 and then to 4.
-    An existing version 3 database is migrated transactionally to version 4.
-    Version 4 database no-ops cleanly.
+    version 2, then to 3, to 4, and then to 5.
+    An existing version 2 database is migrated to 3, 4, and then to 5.
+    An existing version 3 database is migrated to 4 and then to 5.
+    An existing version 4 database is migrated to 5.
+    Version 5 database no-ops cleanly.
     """
     with Session(engine) as session:
         connection = session.connection()
@@ -68,9 +73,9 @@ def init_db(engine: Engine) -> None:
         # Read version before any database mutation or table checks
         version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
 
-        if version > 4:
+        if version > 5:
             raise UnsupportedDatabaseVersionError(
-                f"Database version {version} is newer than the supported version 4."
+                f"Database version {version} is newer than the supported version 5."
             )
 
         # Check if 'nodes' table exists after version check
@@ -82,8 +87,8 @@ def init_db(engine: Engine) -> None:
         if not table_exists:
             # Create all tables defined in SQLModel metadata
             SQLModel.metadata.create_all(engine)
-            # Set user_version to 4
-            connection.execute(text("PRAGMA user_version = 4;"))
+            # Set user_version to 5
+            connection.execute(text("PRAGMA user_version = 5;"))
             session.commit()
             return
 
@@ -259,6 +264,81 @@ def init_db(engine: Engine) -> None:
                     pass
                 raise DatabaseMigrationError(
                     f"Migration from version {version} to 4 failed. "
+                    "All changes rolled back."
+                ) from e
+
+        if version == 4:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+
+                # Create multi_launchers table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS multi_launchers (
+                        id VARCHAR NOT NULL,
+                        launcher_node_id VARCHAR NOT NULL,
+                        workspace_id VARCHAR NOT NULL,
+                        name VARCHAR NOT NULL,
+                        description VARCHAR,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(launcher_node_id)
+                            REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(workspace_id)
+                            REFERENCES nodes (id) ON DELETE CASCADE
+                    );
+                """)
+
+                # Create multi_launcher_items table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS multi_launcher_items (
+                        id VARCHAR NOT NULL,
+                        multi_launcher_id VARCHAR NOT NULL,
+                        launch_profile_id VARCHAR NOT NULL,
+                        position INTEGER NOT NULL,
+                        enabled BOOLEAN NOT NULL,
+                        delay_ms INTEGER NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(multi_launcher_id)
+                            REFERENCES multi_launchers (id) ON DELETE CASCADE,
+                        FOREIGN KEY(launch_profile_id)
+                            REFERENCES launch_profiles (id) ON DELETE CASCADE
+                    );
+                """)
+
+                # Create indexes
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_multi_launchers_launcher_node_id "
+                    "ON multi_launchers (launcher_node_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_multi_launchers_workspace_id "
+                    "ON multi_launchers (workspace_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_multi_launcher_items_multi_launcher_id "
+                    "ON multi_launcher_items (multi_launcher_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "ix_multi_launcher_items_launch_profile_id "
+                    "ON multi_launcher_items (launch_profile_id);"
+                )
+
+                cursor.execute("PRAGMA user_version = 5;")
+                dbapi_conn.commit()
+                cursor.close()
+                version = 5
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Migration from version {version} to 5 failed. "
                     "All changes rolled back."
                 ) from e
 

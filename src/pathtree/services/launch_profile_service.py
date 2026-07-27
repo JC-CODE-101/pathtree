@@ -267,6 +267,20 @@ class LaunchProfileService:
         except Exception:
             pass
 
+        # Delete referencing MultiLauncherItems to avoid foreign key violations
+        from sqlmodel import delete
+
+        from pathtree.models.multi_launcher import MultiLauncherItem
+
+        try:
+            statement = delete(MultiLauncherItem).where(
+                MultiLauncherItem.launch_profile_id == profile_id
+            )
+            self.launch_profile_repository.session.exec(statement)
+            self.launch_profile_repository.session.flush()
+        except Exception:
+            pass
+
         # Delete profile record
         return self.launch_profile_repository.delete(profile_id)
 
