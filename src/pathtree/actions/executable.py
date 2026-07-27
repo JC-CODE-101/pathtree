@@ -42,6 +42,16 @@ class ExecutableActionProvider(ResourceActionProvider):
                 description="Open the folder containing this executable",
             ),
             ResourceAction(
+                id="create_launch_profile",
+                label="Create Launch Profile",
+                description="Create a launch profile for this executable",
+            ),
+            ResourceAction(
+                id="view_launch_profiles",
+                label="View Launch Profiles",
+                description="View launch profiles for this executable",
+            ),
+            ResourceAction(
                 id="copy_path",
                 label="Copy Path",
                 description="Copy executable path to clipboard",
@@ -89,7 +99,14 @@ class ExecutableActionProvider(ResourceActionProvider):
 
         path_obj = Path(resolved_path)
 
-        if action_id == "launch":
+        if action_id in ("create_launch_profile", "view_launch_profiles"):
+            return ResourceActionResult(
+                success=True,
+                exit_app=False,
+                target=ResourceActionResultTarget.NONE,
+            )
+
+        elif action_id == "launch":
             # Validate executable resources before creation, editing and activation
             try:
                 if not resolved_path:

@@ -88,3 +88,28 @@ Unpin a node globally by its visible numeric position:
 pb --unpin <number>
 ```
 Positions are automatically compacted and kept contiguous starting at 1.
+
+---
+
+## Launch Profiles CLI Syntax
+
+The `pb` command also supports listing and running launch profiles directly from your terminal session:
+
+### List Launch Profiles
+Lists all active and detached launch profiles globally:
+```bash
+pb --profiles
+```
+Example Output:
+```
+1    Blender Normal           Blender        Blender 5.1         executable  active
+2    Blender Detached         Blender        Blender 4.5         executable  detached
+```
+
+### Run Profile by Number
+Run an active launch profile by its visible numeric position:
+```bash
+pb --profile 1
+```
+- If active, the profile is executed (runs the target script/executable with combined arguments and resolved working directory).
+- If detached, execution is rejected with a non-zero exit code.

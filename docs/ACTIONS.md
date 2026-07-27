@@ -342,6 +342,31 @@ PathTree supports full-featured, secure URL resources.
 3. **`view_details`**
    - Displays structured metadata about the URL including Name, URL, Scheme, Domain, Path, and Description if present, presented in the details panel using `ResourceActionResultTarget.DETAILS`.
 
+## Concrete Resource Types: Launch Profile Resource Support
+
+PathTree supports full-featured, secure Launch Profile execution.
+
+### Available Actions
+1. **`run_profile` (Default)**
+   - Executes the selected launch profile safely if it is active.
+   - Resolves the target node path and interpreter (for script) or validates execution capabilities (for executable).
+   - Combines target base execution argv with the profile's explicit argv list.
+   - Resolves the optional working directory (Directory resource node). If none is configured, falls back to target's default parent directory.
+   - Launches using standard `PlatformLauncher.launch_process` (for inherit terminal mode) or `PlatformLauncher.launch_in_terminal` (for new terminal mode).
+   - Never uses `shell=True` and rejects detached profiles with an error.
+
+2. **`edit_profile`**
+   - Triggers the TUI edit modal dialog for Launch Profiles.
+
+3. **`reconnect_target`**
+   - Triggers the TUI target reconnection dialog.
+
+4. **`view_details`**
+   - Displays structured metadata about the Launch Profile including Name, Status, Target (name, type, path, or previous target details if detached), Arguments (argv list), Working Directory (resource name and path), and Terminal Mode.
+
+5. **`delete_profile`**
+   - Deletes the Launch Profile record and its node representation.
+
 ## Future Resource Types
 - The architecture is designed to accommodate additional resource types such as:
   - `ssh` / `command`

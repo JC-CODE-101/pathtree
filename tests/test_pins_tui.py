@@ -1,5 +1,6 @@
 import pytest
 from sqlmodel import Session
+from textual.widgets import DataTable
 
 from pathtree.database.repository import NodeRepository, PinRepository
 from pathtree.services.node_service import NodeService
@@ -7,7 +8,6 @@ from pathtree.services.pin_service import PinService
 from pathtree.ui.app import PathTreeApp
 from pathtree.ui.dialogs.action_menu import ResourceActionMenu
 from pathtree.ui.screens.pins import PinsScreen
-from textual.widgets import DataTable
 
 
 @pytest.fixture

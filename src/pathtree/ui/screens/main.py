@@ -85,6 +85,21 @@ class MainScreen(Screen[None]):
         else:
             self.pin_service = None
 
+        # Initialize Launch Profile Service
+        if (
+            hasattr(self.node_service, "repository")
+            and self.node_service.repository is not None
+        ):
+            from pathtree.database.repository import LaunchProfileRepository
+            from pathtree.services.launch_profile_service import LaunchProfileService
+
+            lp_repo = LaunchProfileRepository(self.node_service.repository.session)
+            self.launch_profile_service = LaunchProfileService(
+                self.node_service, lp_repo
+            )
+        else:
+            self.launch_profile_service = None
+
         # Initialize Action Registry and Register Providers
         self.action_registry = ResourceActionRegistry()
         self.action_registry.register(
@@ -110,6 +125,17 @@ class MainScreen(Screen[None]):
         self.action_registry.register(
             "resource", "url", UrlActionProvider(self.node_service)
         )
+
+        if self.launch_profile_service:
+            from pathtree.actions.launch_profile import LaunchProfileActionProvider
+
+            self.action_registry.register(
+                "resource",
+                "launch_profile",
+                LaunchProfileActionProvider(
+                    self.node_service, self.launch_profile_service
+                ),
+            )
 
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""
@@ -377,6 +403,115 @@ class MainScreen(Screen[None]):
         action_obj = next((a for a in actions if a.id == action_id), None)
         if action_obj is not None and not action_obj.is_enabled:
             details_panel.update_error(f"Action '{action_obj.label}' is disabled.")
+            return
+
+        # Special launch profile creation/view action handler
+        if action_id == "create_launch_profile":
+            from pathtree.ui.dialogs.edit_profile import EditProfileDialog
+
+            tree = self.query_one("#tree-view", NodeTreeView)
+
+            def handle_create_finished(changed: bool) -> None:
+                if changed:
+                    self.app.notify("Launch Profile created successfully.")
+                    self.refresh_tree()
+                tree.focus()
+
+            self.app.push_screen(
+                EditProfileDialog(
+                    self.node_service,
+                    self.launch_profile_service,
+                    target_node_id=context.node.id,
+                ),
+                callback=handle_create_finished,
+            )
+            return
+
+        elif action_id == "view_launch_profiles":
+            from pathtree.ui.dialogs.launch_profiles_list import LaunchProfilesScreen
+
+            tree = self.query_one("#tree-view", NodeTreeView)
+
+            def handle_view_finished(res) -> None:
+                self.refresh_tree()
+                tree.focus()
+
+            self.app.push_screen(
+                LaunchProfilesScreen(
+                    self.node_service,
+                    self.launch_profile_service,
+                    target_node_id=context.node.id,
+                ),
+                callback=handle_view_finished,
+            )
+            return
+
+        elif action_id == "edit_profile":
+            from pathtree.ui.dialogs.edit_profile import EditProfileDialog
+
+            tree = self.query_one("#tree-view", NodeTreeView)
+            try:
+                profile = self.launch_profile_service.get_profile_for_node(
+                    context.node.id
+                )
+
+                def handle_edit_finished(changed: bool) -> None:
+                    if changed:
+                        self.app.notify("Launch Profile updated.")
+                        self.refresh_tree(selected_node_id=context.node.id)
+                    tree.focus()
+
+                self.app.push_screen(
+                    EditProfileDialog(
+                        self.node_service,
+                        self.launch_profile_service,
+                        profile_id=profile.id,
+                    ),
+                    callback=handle_edit_finished,
+                )
+            except Exception as e:
+                details_panel.update_error(str(e))
+            return
+
+        elif action_id == "reconnect_target":
+            from pathtree.ui.dialogs.reconnect_profile import ReconnectTargetDialog
+
+            tree = self.query_one("#tree-view", NodeTreeView)
+            try:
+                profile = self.launch_profile_service.get_profile_for_node(
+                    context.node.id
+                )
+
+                def handle_reconnect_finished(changed: bool) -> None:
+                    if changed:
+                        self.app.notify("Launch Profile reconnected.")
+                        self.refresh_tree(selected_node_id=context.node.id)
+                    tree.focus()
+
+                self.app.push_screen(
+                    ReconnectTargetDialog(
+                        self.node_service,
+                        self.launch_profile_service,
+                        profile_id=profile.id,
+                    ),
+                    callback=handle_reconnect_finished,
+                )
+            except Exception as e:
+                details_panel.update_error(str(e))
+            return
+
+        elif action_id == "delete_profile":
+            tree = self.query_one("#tree-view", NodeTreeView)
+            try:
+                profile = self.launch_profile_service.get_profile_for_node(
+                    context.node.id
+                )
+                self.launch_profile_service.delete_profile(profile.id)
+                self.app.notify("Launch Profile deleted.")
+                self.refresh_tree()
+                tree.focus()
+            except Exception as e:
+                details_panel.update_error(str(e))
             return
 
         result = provider.execute(action_id, context)

@@ -18,16 +18,20 @@ def classify_node_type(node_kind: str, resource_type: str | None) -> str:
     Supported keys:
     - workspace
     - folder
+    - system_group
     - directory
     - file
     - script
     - executable
     - url
+    - launch_profile
     """
     if node_kind == "workspace":
         return "workspace"
     elif node_kind == "folder":
         return "folder"
+    elif node_kind == "system_group":
+        return "system_group"
     elif node_kind == "resource":
         if resource_type in (
             "directory",
@@ -35,6 +39,7 @@ def classify_node_type(node_kind: str, resource_type: str | None) -> str:
             "script",
             "executable",
             "url",
+            "launch_profile",
         ):
             return resource_type or "directory"
         return resource_type or "directory"
@@ -208,11 +213,15 @@ class IconRegistry:
         # 1. Resource type defaults
         self.register_resource_icon("workspace", "󰙅", "◆")
         self.register_resource_icon("folder", "󰉋", "⌂")
+        self.register_resource_icon("system_group", "󰒓", "⚙")
         self.register_resource_icon("directory", "󰉋", "▪")
         self.register_resource_icon("file", "󰈔", "▤")
         self.register_resource_icon("script", "󰧑", "⚡")
         self.register_resource_icon("executable", "󰆍", "⚙")
         self.register_resource_icon("url", "󰖟", "↗")
+        self.register_resource_icon("launch_profile", "󰓅", "▶")
+        self.register_resource_icon("launch_profiles", "󰒓", "⚙")
+        self.register_resource_icon("detached_launch_profiles", "󰅚", "⚠")
 
         # 2. File extension defaults
         self.register_extension_icon(".py", "󰌠", "▤")
@@ -279,6 +288,12 @@ class IconRegistry:
         # 3. Resource type check
         node_kind = getattr(node, "node_kind", "resource")
         resource_type = getattr(node, "resource_type", None)
+        system_role = getattr(node, "system_role", None)
+
+        if node_kind == "system_group" and system_role:
+            if system_role in self._resource_icons:
+                return self._get_resolved_icon(self._resource_icons[system_role])
+
         category = classify_node_type(node_kind, resource_type)
         if category in self._resource_icons:
             return self._get_resolved_icon(self._resource_icons[category])

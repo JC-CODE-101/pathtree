@@ -28,3 +28,11 @@ Documents all keyboard shortcuts and their behavior in each user-interface conte
 - `[`: Move the highlighted pin up (decrement position index).
 - `]`: Move the highlighted pin down (increment position index).
 - `Escape`: Close Pins screen.
+
+## Launch Profiles Screen (Connected to Script or Executable)
+
+- `Enter` / Left-Click: Run the highlighted profile.
+- `e`: Edit the highlighted profile (opens Edit Profile Dialog).
+- `r`: Reconnect the target for the highlighted profile (opens Reconnect Target Dialog).
+- `x`: Delete the highlighted profile.
+- `Escape` / `q`: Close Launch Profiles screen.

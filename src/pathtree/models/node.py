@@ -37,13 +37,19 @@ class Node(SQLModel, table=True):
         default="resource",
         index=True,
         nullable=False,
-    )  # workspace | folder | resource
+    )  # workspace | folder | resource | system_group
 
     resource_type: str | None = Field(
         default=None,
         index=True,
         nullable=True,
     )  # directory | null (for other types in future)
+
+    system_role: str | None = Field(
+        default=None,
+        index=True,
+        nullable=True,
+    )  # launch_profiles | detached_launch_profiles | None
 
     is_favorite: bool = Field(
         default=False,

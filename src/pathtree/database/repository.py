@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlmodel import Session, select
 
 from pathtree.database.errors import RepositoryError, RepositoryIntegrityError
+from pathtree.models.launch_profile import LaunchProfile
 from pathtree.models.node import Node
 from pathtree.models.pin import Pin
 
@@ -310,3 +311,105 @@ class PinRepository:
         statement = select(Pin).order_by(Pin.position.desc())
         pin = self.session.exec(statement).first()
         return pin.position if pin else 0
+
+
+class LaunchProfileRepository:
+    """Repository for managing LaunchProfile persistence."""
+
+    def __init__(self, session: Session) -> None:
+        """Initialize the repository with a database session."""
+        self.session = session
+
+    def create(self, profile: LaunchProfile) -> LaunchProfile:
+        """Create a new LaunchProfile in the database."""
+        try:
+            self.session.add(profile)
+            self.session.commit()
+            self.session.refresh(profile)
+            return profile
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
+
+    def get_by_id(self, id: uuid.UUID) -> LaunchProfile | None:
+        """Retrieve a LaunchProfile by its UUID."""
+        return self.session.get(LaunchProfile, id)
+
+    def get_by_profile_node_id(
+        self, profile_node_id: uuid.UUID
+    ) -> LaunchProfile | None:
+        """Retrieve a LaunchProfile by its Profile Node UUID."""
+        statement = select(LaunchProfile).where(
+            LaunchProfile.profile_node_id == profile_node_id
+        )
+        return self.session.exec(statement).first()
+
+    def list_all(self) -> Sequence[LaunchProfile]:
+        """Retrieve all LaunchProfile records."""
+        statement = select(LaunchProfile)
+        return self.session.exec(statement).all()
+
+    def list_by_workspace(self, workspace_id: uuid.UUID) -> Sequence[LaunchProfile]:
+        """Retrieve all LaunchProfile records belonging to a workspace."""
+        statement = select(LaunchProfile).where(
+            LaunchProfile.workspace_id == workspace_id
+        )
+        return self.session.exec(statement).all()
+
+    def list_by_target(self, target_node_id: uuid.UUID) -> Sequence[LaunchProfile]:
+        """Retrieve all LaunchProfile records connected to a target node."""
+        statement = select(LaunchProfile).where(
+            LaunchProfile.target_node_id == target_node_id
+        )
+        return self.session.exec(statement).all()
+
+    def list_by_working_directory(
+        self, working_directory_node_id: uuid.UUID
+    ) -> Sequence[LaunchProfile]:
+        """Retrieve all LaunchProfile records using a working directory."""
+        statement = select(LaunchProfile).where(
+            LaunchProfile.working_directory_node_id == working_directory_node_id
+        )
+        return self.session.exec(statement).all()
+
+    def update(self, profile: LaunchProfile) -> LaunchProfile:
+        """Update an existing LaunchProfile in the database."""
+        from datetime import UTC, datetime
+
+        profile.updated_at = datetime.now(UTC)
+        try:
+            self.session.add(profile)
+            self.session.commit()
+            self.session.refresh(profile)
+            return profile
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
+
+    def delete(self, id: uuid.UUID) -> bool:
+        """Delete a LaunchProfile by its UUID."""
+        profile = self.get_by_id(id)
+        if profile:
+            try:
+                self.session.delete(profile)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
+        return False

@@ -6,6 +6,8 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine, text
 
+from pathtree.models.launch_profile import LaunchProfile  # noqa: F401
+
 # Ensure models are imported so they register on SQLModel.metadata
 from pathtree.models.node import Node  # noqa: F401
 from pathtree.models.pin import Pin  # noqa: F401
@@ -49,15 +51,16 @@ def create_db_engine(db_path: Path) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Query user_version, generate tables if needed, and migrate to version 3.
+    """Query user_version, generate tables if needed, and migrate to version 4.
 
-    If the database reports user_version > 3, we refuse startup with
+    If the database reports user_version > 4, we refuse startup with
     UnsupportedDatabaseVersionError.
-    Fresh database creates tables directly at version 3.
+    Fresh database creates tables directly at version 4.
     An existing version 1 (or 0) database is migrated transactionally to
-    version 2, then to 3.
-    An existing version 2 database is migrated transactionally to version 3.
-    Version 3 database no-ops cleanly.
+    version 2, then to 3, and then to 4.
+    An existing version 2 database is migrated transactionally to version 3 and then to 4.
+    An existing version 3 database is migrated transactionally to version 4.
+    Version 4 database no-ops cleanly.
     """
     with Session(engine) as session:
         connection = session.connection()
@@ -65,9 +68,9 @@ def init_db(engine: Engine) -> None:
         # Read version before any database mutation or table checks
         version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
 
-        if version > 3:
+        if version > 4:
             raise UnsupportedDatabaseVersionError(
-                f"Database version {version} is newer than the supported version 3."
+                f"Database version {version} is newer than the supported version 4."
             )
 
         # Check if 'nodes' table exists after version check
@@ -79,8 +82,8 @@ def init_db(engine: Engine) -> None:
         if not table_exists:
             # Create all tables defined in SQLModel metadata
             SQLModel.metadata.create_all(engine)
-            # Set user_version to 3
-            connection.execute(text("PRAGMA user_version = 3;"))
+            # Set user_version to 4
+            connection.execute(text("PRAGMA user_version = 4;"))
             session.commit()
             return
 
@@ -195,6 +198,67 @@ def init_db(engine: Engine) -> None:
                     pass
                 raise DatabaseMigrationError(
                     f"Migration from version {version} to 3 failed. "
+                    "All changes rolled back."
+                ) from e
+
+        if version == 3:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+
+                # Add system_role column to nodes table
+                cursor.execute(
+                    "ALTER TABLE nodes ADD COLUMN system_role VARCHAR DEFAULT NULL;"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_nodes_system_role ON nodes (system_role);"
+                )
+
+                # Create launch_profiles table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS launch_profiles (
+                        id VARCHAR NOT NULL,
+                        profile_node_id VARCHAR NOT NULL,
+                        workspace_id VARCHAR NOT NULL,
+                        target_node_id VARCHAR,
+                        target_resource_type VARCHAR NOT NULL,
+                        arguments TEXT NOT NULL,
+                        working_directory_node_id VARCHAR,
+                        terminal_mode VARCHAR NOT NULL,
+                        status VARCHAR NOT NULL,
+                        previous_target_name VARCHAR,
+                        previous_target_path VARCHAR,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(profile_node_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(workspace_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(target_node_id) REFERENCES nodes (id) ON DELETE SET NULL,
+                        FOREIGN KEY(working_directory_node_id) REFERENCES nodes (id) ON DELETE SET NULL
+                    );
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_launch_profiles_profile_node_id ON launch_profiles (profile_node_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_launch_profiles_workspace_id ON launch_profiles (workspace_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_launch_profiles_target_node_id ON launch_profiles (target_node_id);"
+                )
+
+                cursor.execute("PRAGMA user_version = 4;")
+                dbapi_conn.commit()
+                cursor.close()
+                version = 4
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Migration from version {version} to 4 failed. "
                     "All changes rolled back."
                 ) from e
 

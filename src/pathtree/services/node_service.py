@@ -194,9 +194,9 @@ class NodeService:
         if node_kind == "workspace" and parent_id is not None:
             raise ValidationError("Workspace may only exist at Root.")
 
-        if node_kind in ("folder", "resource") and parent_id is None:
+        if node_kind in ("folder", "resource", "system_group") and parent_id is None:
             raise ValidationError(
-                f"{node_kind.capitalize()} cannot be created under Root "
+                f"{node_kind.capitalize().replace('_', ' ')} cannot be created under Root "
                 "(parent must be Workspace or Folder)."
             )
 
@@ -212,8 +212,8 @@ class NodeService:
         if parent_node is None:
             raise ParentNotFoundError(f"Parent node {parent_id} does not exist.")
 
-        # 3. Rejects parent nodes that are not in {"workspace", "folder"}
-        if parent_node.node_kind not in {"workspace", "folder"}:
+        # 3. Rejects parent nodes that are not in {"workspace", "folder", "system_group"}
+        if parent_node.node_kind not in {"workspace", "folder", "system_group"}:
             raise InvalidParentKindError(
                 f"Parent node {parent_id} kind "
                 f"'{parent_node.node_kind}' is not allowed."
@@ -356,11 +356,13 @@ class NodeService:
         Only specific combinations of node_kind and resource_type are valid:
         - node_kind = "workspace" and resource_type = None
         - node_kind = "folder" and resource_type = None
+        - node_kind = "system_group" and resource_type = None
         - node_kind = "resource" and resource_type = "directory"
         - node_kind = "resource" and resource_type = "file"
         - node_kind = "resource" and resource_type = "script"
         - node_kind = "resource" and resource_type = "executable"
         - node_kind = "resource" and resource_type = "url"
+        - node_kind = "resource" and resource_type = "launch_profile"
 
         Raises:
             ValidationError: If any other combination is provided.
@@ -373,6 +375,8 @@ class NodeService:
             valid = True
         elif kind == "folder" and res_type is None:
             valid = True
+        elif kind == "system_group" and res_type is None:
+            valid = True
         elif kind == "resource" and res_type == "directory":
             valid = True
         elif kind == "resource" and res_type == "file":
@@ -382,6 +386,8 @@ class NodeService:
         elif kind == "resource" and res_type == "executable":
             valid = True
         elif kind == "resource" and res_type == "url":
+            valid = True
+        elif kind == "resource" and res_type == "launch_profile":
             valid = True
 
         if not valid:
@@ -401,6 +407,7 @@ class NodeService:
         is_favorite: bool = False,
         is_temporary: bool = False,
         sort_order: int = 0,
+        system_role: str | None = None,
     ) -> Node:
         """Create a new node after performing validations.
 
@@ -421,6 +428,25 @@ class NodeService:
         # 2. Validate requested parent
         self.validate_parent(None, parent_id, node_kind=node_kind)
 
+        # 2b. Prevent duplicate system groups
+        if (
+            node_kind == "system_group"
+            and parent_id is not None
+            and system_role is not None
+        ):
+            from sqlmodel import select
+
+            statement = select(Node).where(
+                Node.parent_id == parent_id,
+                Node.node_kind == "system_group",
+                Node.system_role == system_role,
+            )
+            existing_sg = self.repository.session.exec(statement).first()
+            if existing_sg:
+                raise ValidationError(
+                    f"A system group with role '{system_role}' already exists under this parent."
+                )
+
         # 3. Validate sibling-name uniqueness
         if self.repository.has_sibling_with_name(parent_id, trimmed_name):
             raise DuplicateSiblingNameError(
@@ -438,7 +464,10 @@ class NodeService:
                 normalized_path = normalize_path(path)
 
         # 5. Check structural workspace and folder nodes must not contain a path
-        if node_kind in ("workspace", "folder") and normalized_path is not None:
+        if (
+            node_kind in ("workspace", "folder", "system_group")
+            and normalized_path is not None
+        ):
             raise ValidationError("Structural nodes must not contain a path.")
 
         # 5b. Check that a File, Script, or Executable has a valid existing path
@@ -482,6 +511,7 @@ class NodeService:
             is_favorite=is_favorite,
             is_temporary=is_temporary,
             sort_order=sort_order,
+            system_role=system_role,
         )
 
         self.validate_node(node)
@@ -710,6 +740,39 @@ class NodeService:
         except RepositoryCycleError as e:
             raise CycleError(str(e)) from e
 
+    def _find_workspace_for_node(self, node_id: uuid.UUID) -> Node | None:
+        """Find the Workspace ancestor of a node."""
+        curr = self.repository.get_by_id(node_id)
+        while curr is not None:
+            if curr.node_kind == "workspace":
+                return curr
+            if curr.parent_id is None:
+                break
+            curr = self.repository.get_by_id(curr.parent_id)
+        return None
+
+    def get_or_create_system_group(
+        self, workspace_id: uuid.UUID, system_role: str, default_name: str
+    ) -> Node:
+        """Find or lazily create exactly one managed system group under a workspace."""
+        from sqlmodel import select
+
+        statement = select(Node).where(
+            Node.parent_id == workspace_id,
+            Node.node_kind == "system_group",
+            Node.system_role == system_role,
+        )
+        existing = self.repository.session.exec(statement).first()
+        if existing:
+            return existing
+
+        return self.create_node(
+            name=default_name,
+            node_kind="system_group",
+            parent_id=workspace_id,
+            system_role=system_role,
+        )
+
     def delete_node(self, node_id: uuid.UUID, recursive: bool = True) -> bool:
         """Delete a node and its descendants if recursive=True.
 
@@ -720,7 +783,10 @@ class NodeService:
         if node is None:
             raise NodeNotFoundError(f"Node {node_id} does not exist.")
 
-        from pathtree.database.repository import RepositoryCycleError
+        from pathtree.database.repository import (
+            LaunchProfileRepository,
+            RepositoryCycleError,
+        )
 
         try:
             if not recursive:
@@ -730,6 +796,60 @@ class NodeService:
                         f"Node {node_id} has descendants and "
                         "cannot be deleted non-recursively."
                     )
+
+            # Gather all node IDs about to be deleted
+            if recursive:
+                descendants = self.repository.get_descendants(node_id)
+                nodes_to_delete = [node_id] + [d.id for d in descendants]
+            else:
+                nodes_to_delete = [node_id]
+
+            launch_profile_repo = LaunchProfileRepository(self.repository.session)
+
+            for nid in nodes_to_delete:
+                target_node = self.repository.get_by_id(nid)
+                if target_node:
+                    # 1. Detach profiles targeting this node
+                    profiles = launch_profile_repo.list_by_target(nid)
+                    for profile in profiles:
+                        profile.previous_target_name = target_node.name
+                        profile.previous_target_path = target_node.path
+                        profile.target_node_id = None
+                        profile.status = "detached"
+
+                        # Move profile node to Detached Profiles
+                        workspace = self._find_workspace_for_node(nid)
+                        if workspace:
+                            detached_group = self.get_or_create_system_group(
+                                workspace.id,
+                                "detached_launch_profiles",
+                                "Detached Profiles",
+                            )
+                            profile_node = self.repository.get_by_id(
+                                profile.profile_node_id
+                            )
+                            if profile_node:
+                                profile_node.parent_id = detached_group.id
+                                self.repository.update(profile_node)
+
+                        launch_profile_repo.update(profile)
+
+                    # 2. Reset working directory for profiles using this directory node
+                    profiles_using_dir = launch_profile_repo.list_by_working_directory(
+                        nid
+                    )
+                    for profile in profiles_using_dir:
+                        profile.working_directory_node_id = None
+                        launch_profile_repo.update(profile)
+
+                    # 3. If a launch profile node is itself deleted, delete its launch profile record
+                    if (
+                        target_node.node_kind == "resource"
+                        and target_node.resource_type == "launch_profile"
+                    ):
+                        profile = launch_profile_repo.get_by_profile_node_id(nid)
+                        if profile:
+                            launch_profile_repo.delete(profile.id)
 
             self.repository.delete_recursive(node_id)
 

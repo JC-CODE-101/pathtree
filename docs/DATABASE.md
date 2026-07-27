@@ -75,6 +75,29 @@ Deleting a node cascade-deletes its associated pin.
 
 ---
 
+## Launch Profile (Added in Version 4)
+
+Represents a reusable execution profile for an existing Script or Executable node.
+
+Fields:
+- `id`: Unique identifier (UUID).
+- `profile_node_id`: References the profile representation node (`nodes.id`, ON DELETE CASCADE).
+- `workspace_id`: References the originating Workspace node (`nodes.id`, ON DELETE CASCADE).
+- `target_node_id`: References the target Script/Executable node (`nodes.id`, ON DELETE SET NULL, nullable).
+- `target_resource_type`: Type of target ("script" or "executable").
+- `arguments`: JSON-serialized list of argv strings.
+- `working_directory_node_id`: References the working directory Directory resource node (`nodes.id`, ON DELETE SET NULL, nullable).
+- `terminal_mode`: Terminal execution mode ("inherit" or "new_terminal").
+- `status`: Status of the profile ("active" or "detached").
+- `previous_target_name`: Preserved name of target node if deleted.
+- `previous_target_path`: Preserved path of target node if deleted.
+- `created_at`: Creation timestamp.
+- `updated_at`: Modification timestamp.
+
+Deleting a target Script/Executable node detaches the profile (sets `target_node_id` to NULL and moves the node representation under "Detached Profiles" system group), preserving arguments and other settings. Deleting a working directory node resets `working_directory_node_id` to NULL. Deleting a profile node cascade-deletes the LaunchProfile record.
+
+---
+
 ## Action
 
 Represents an executable action attached to a node.
