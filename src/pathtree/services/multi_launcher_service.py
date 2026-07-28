@@ -141,6 +141,17 @@ class MultiLauncherService:
                 )
             launcher.description = description
 
+        # Move tree node under workspace's "Multi Launchers" system group upon edit
+        try:
+            group = self.node_service.get_or_create_system_group(
+                launcher.workspace_id, "multi_launchers", "Multi Launchers"
+            )
+            node = self.node_service.get_node(launcher.launcher_node_id)
+            if node and node.parent_id != group.id:
+                self.node_service.move_node(launcher.launcher_node_id, group.id)
+        except Exception:
+            pass
+
         return self.repository.update(launcher)
 
     def delete_launcher(self, launcher_id: uuid.UUID) -> bool:

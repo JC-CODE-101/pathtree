@@ -799,6 +799,39 @@ class MainScreen(Screen[None]):
         captured_expanded_node_ids = tree.get_expanded_node_ids()
         node_id = tree.cursor_node.data
 
+        node = self.node_service.get_node(node_id)
+        if (
+            node is not None
+            and node.node_kind == "resource"
+            and node.resource_type == "multi_launcher"
+        ):
+            from pathtree.ui.dialogs.edit_multi_launcher import (
+                EditMultiLauncherDialog,
+            )
+
+            try:
+                launcher = self.multi_launcher_service.get_launcher_for_node(node_id)
+
+                def handle_launcher_edit_finished(changed: bool) -> None:
+                    if changed:
+                        self.app.notify("Multi Launcher updated.")
+                        self.refresh_tree(selected_node_id=node_id)
+                    tree.focus()
+
+                self.app.push_screen(
+                    EditMultiLauncherDialog(
+                        self.node_service,
+                        self.launch_profile_service,
+                        self.multi_launcher_service,
+                        launcher_id=launcher.id,
+                    ),
+                    callback=handle_launcher_edit_finished,
+                )
+            except Exception as e:
+                details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+                details_panel.update_error(str(e))
+            return
+
         def handle_edit_finished(success: bool) -> None:
             if success:
                 node = self.node_service.get_node(node_id)

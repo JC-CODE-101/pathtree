@@ -462,6 +462,12 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 return
 
             try:
+                # Force parent_id to be workspace's "Multi Launchers" system group
+                ml_group = self.node_service.get_or_create_system_group(
+                    workspace_id, "multi_launchers", "Multi Launchers"
+                )
+                parent_id = ml_group.id
+
                 new_node = self.node_service.create_node(
                     name=name,
                     node_kind=node_kind,

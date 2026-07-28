@@ -612,3 +612,158 @@ async def test_add_node_from_system_group_regression(session):
         await pilot.press("escape")
         await pilot.pause(0.01)
         assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
+async def test_tui_edit_shortcut_toggles_and_delay_prompt_validation(session):
+    """Verify Edit Multi Launcher Dialog bindings, enable/disable toggle.
+
+    Also tests delay prompt validation errors.
+    """
+    node_repo = NodeRepository(session)
+    node_service = NodeService(node_repo)
+    ws = node_service.create_node(name="WS", node_kind="workspace")
+    script = node_service.create_node(
+        name="Build Script",
+        node_kind="resource",
+        resource_type="script",
+        parent_id=ws.id,
+        path=__file__,
+    )
+
+    lp_repo = LaunchProfileRepository(session)
+    lp_service = LaunchProfileService(node_service, lp_repo)
+    lp = lp_service.create_profile(name="P1", target_node_id=script.id, arguments=[])
+
+    ml_repo = MultiLauncherRepository(session)
+    ml_service = MultiLauncherService(node_service, lp_service, ml_repo)
+    ml = ml_service.create_launcher(name="Launcher A", workspace_id=ws.id)
+    ml_service.add_item(ml.id, lp.id, delay_ms=100)
+
+    from pathtree.ui.app import PathTreeApp
+    from pathtree.ui.dialogs.edit_multi_launcher import EditMultiLauncherDialog
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to Build Script
+        await pilot.press("j")  # Move to Launch Profiles
+        await pilot.press("j")  # Move to Multi Launchers
+        await pilot.press("l")  # Expand Multi Launchers
+        await pilot.press("j")  # Move to Launcher A
+
+        # 'e' opens EditMultiLauncherDialog (not EditNodeDialog)
+        await pilot.press("e")
+        await pilot.pause(0.01)
+
+        assert isinstance(app.screen, EditMultiLauncherDialog)
+        dialog = app.screen
+
+        # Verify initial table state
+        table = dialog.query_one("#launcher-table")
+        assert table.row_count == 1
+        assert "ENABLED" in str(table.get_row_at(0))
+
+        # Press 'e' on the row to toggle disabled
+        await pilot.press("e")
+        await pilot.pause(0.01)
+        assert "DISABLED" in str(table.get_row_at(0))
+
+        # Press 'd' to open delay prompt
+        await pilot.press("d")
+        await pilot.pause(0.01)
+
+        prompt_screen = app.screen
+        assert prompt_screen.__class__.__name__ == "DelayPromptScreen"
+
+        # Type invalid value like "-50" or blank, and check validation message
+        # Let's clear and write a negative number
+        input_widget = prompt_screen.query_one("#input-delay-prompt")
+        input_widget.value = ""
+        await pilot.press("hyphen", "5", "0")
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+
+        # Check prompt-error label has validation message
+        error_label = prompt_screen.query_one("#prompt-error")
+        assert "Delay must be a non-negative integer." in error_label.render().plain
+
+        # Enter a valid delay like "500" and press enter
+        input_widget.value = ""
+        await pilot.press("5", "0", "0")
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+
+        # Verify back on Edit dialog and delay is updated
+        assert isinstance(app.screen, EditMultiLauncherDialog)
+        assert "500 ms" in str(table.get_row_at(0))
+
+        # Close out
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert app.screen.id == "main-screen"
+
+
+@pytest.mark.asyncio
+async def test_details_panel_rendering(session):
+    """Verify that Details Panel shows Multi Launcher metadata & item lists."""
+    node_repo = NodeRepository(session)
+    node_service = NodeService(node_repo)
+    ws = node_service.create_node(name="WS", node_kind="workspace")
+    script = node_service.create_node(
+        name="Build Script",
+        node_kind="resource",
+        resource_type="script",
+        parent_id=ws.id,
+        path=__file__,
+    )
+
+    lp_repo = LaunchProfileRepository(session)
+    lp_service = LaunchProfileService(node_service, lp_repo)
+    lp1 = lp_service.create_profile(name="P1", target_node_id=script.id, arguments=[])
+    lp2 = lp_service.create_profile(name="P2", target_node_id=script.id, arguments=[])
+
+    ml_repo = MultiLauncherRepository(session)
+    ml_service = MultiLauncherService(node_service, lp_service, ml_repo)
+    ml = ml_service.create_launcher(
+        name="Launcher A",
+        workspace_id=ws.id,
+        description="Details test",
+    )
+    ml_service.add_item(ml.id, lp1.id, delay_ms=100)
+    item2 = ml_service.add_item(ml.id, lp2.id, delay_ms=200)
+    ml_service.set_item_enabled(item2.id, False)
+
+    from pathtree.ui.app import PathTreeApp
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to Build Script
+        await pilot.press("j")  # Move to Launch Profiles
+        await pilot.press("j")  # Move to Multi Launchers
+        await pilot.press("l")  # Expand Multi Launchers
+        await pilot.press("j")  # Move to Launcher A
+
+        # Verify cursor is on Launcher A
+        assert "Launcher A" in str(tree.cursor_node.label)
+
+        # Check details panel text content
+        details_panel = app.screen.query_one("#details-panel")
+        content = details_panel.render().plain
+
+        # Content should include Workspace Name, description, counts, and listing.
+        assert "Workspace: WS" in content
+        assert "Description: Details test" in content
+        assert "Profiles: 2" in content
+        assert "Enabled: 1" in content
+        assert "Total Delay: 0 ms" in content
+        assert "1. P1 [100 ms]" in content
+        assert "2. P2 [disabled]" in content

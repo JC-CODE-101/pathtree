@@ -179,7 +179,30 @@ class EditMultiLauncherDialog(ModalScreen[bool]):
 
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("escape", "cancel_close", "Close", show=True),
+        Binding("e", "toggle_enabled", "Toggle Enabled", show=True),
+        Binding("d", "set_delay", "Set Delay", show=True),
+        Binding("t", "set_delay", "Set Delay", show=False),
+        Binding("j", "cursor_down", "Nav Down", show=False),
+        Binding("k", "cursor_up", "Nav Up", show=False),
     ]
+
+    def action_toggle_enabled(self) -> None:
+        self.toggle_selected_item()
+
+    def action_set_delay(self) -> None:
+        self.set_selected_item_delay()
+
+    def action_cursor_down(self) -> None:
+        table = self.query_one("#launcher-table", DataTable)
+        cursor_row = table.cursor_row
+        if cursor_row is not None and cursor_row < len(self._items_map) - 1:
+            table.move_cursor(row=cursor_row + 1)
+
+    def action_cursor_up(self) -> None:
+        table = self.query_one("#launcher-table", DataTable)
+        cursor_row = table.cursor_row
+        if cursor_row is not None and cursor_row > 0:
+            table.move_cursor(row=cursor_row - 1)
 
     def __init__(
         self,
@@ -434,13 +457,15 @@ class EditMultiLauncherDialog(ModalScreen[bool]):
                 def submit_val(self) -> None:
                     val_str = self.query_one("#input-delay-prompt", Input).value.strip()
                     try:
+                        if not val_str:
+                            raise ValueError
                         val = int(val_str)
                         if val < 0:
                             raise ValueError
                         self.dismiss(val)
                     except ValueError:
                         self.query_one("#prompt-error", Static).update(
-                            "Delay must be a positive integer."
+                            "Delay must be a non-negative integer."
                         )
 
                 def on_key(self, event) -> None:
