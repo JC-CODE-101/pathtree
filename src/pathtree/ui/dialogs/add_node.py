@@ -138,12 +138,18 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         self.selected_type = "workspace"
 
     def compose(self) -> ComposeResult:
-        parent_choices = self.node_service.get_parent_choices()
-        valid_parent_ids = {choice[1] for choice in parent_choices}
+        parent_choices = self.node_service.get_valid_parent_choices(
+            self.selected_type,
+            self.selected_type,
+            current_parent_id=self.default_parent_id,
+        )
+        valid_parent_ids = {
+            choice[1] for choice in parent_choices if choice[1] is not None
+        }
         initial_parent_value = (
             self.default_parent_id
             if self.default_parent_id in valid_parent_ids
-            else None
+            else (parent_choices[0][1] if parent_choices else None)
         )
 
         with Container(id="dialog-container"):
@@ -192,7 +198,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 yield Select(
                     parent_choices,
                     value=initial_parent_value,
-                    allow_blank=False,
+                    allow_blank=True,
                     id="select-parent",
                 )
 
@@ -309,19 +315,12 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             path_label.update("Path")
             path_input.placeholder = "Enter path (optional)..."
 
-        # Retrieve all parent choices from node service
-        all_choices = self.node_service.get_parent_choices()
-        # Filter choices: only Workspace and Folder nodes (excluding Root,
-        # i.e. None value, and Directory resources)
-        valid_choices = []
-        for label, val_id in all_choices:
-            if val_id is not None:
-                parent_node = self.node_service.get_node(val_id)
-                if parent_node is not None and parent_node.node_kind in (
-                    "workspace",
-                    "folder",
-                ):
-                    valid_choices.append((label, val_id))
+        # Retrieve context-aware parent choices from node service
+        valid_choices = self.node_service.get_valid_parent_choices(
+            self.selected_type,
+            self.selected_type,
+            current_parent_id=self.default_parent_id,
+        )
 
         if not valid_choices:
             select_parent.disabled = True
@@ -332,21 +331,14 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             )
             return
 
+        select_parent.clear()
         select_parent.set_options(valid_choices)
         create_btn.disabled = False
         warning_area.update("")
 
         # Derives the default parent only when valid for chosen type
-        valid = False
-        if self.default_parent_id is not None:
-            parent_node = self.node_service.get_node(self.default_parent_id)
-            if parent_node is not None and parent_node.node_kind in (
-                "workspace",
-                "folder",
-            ):
-                valid = True
-
-        if valid:
+        valid_ids = {choice[1] for choice in valid_choices}
+        if self.default_parent_id in valid_ids:
             select_parent.value = self.default_parent_id
         else:
             select_parent.value = valid_choices[0][1]
@@ -393,12 +385,16 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
+        auto_layout = False
+        auto_route = False
+
         if self.selected_type == "workspace":
             node_kind = "workspace"
             resource_type = None
             path = None
             is_temporary = False
             parent_id = None  # Always force Workspace to be at root (None)
+            auto_layout = True
         elif self.selected_type == "folder":
             if parent_id is None:
                 status_area.update("A valid parent Workspace or Folder is required.")
@@ -407,7 +403,9 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             resource_type = None
             path = None
             is_temporary = False
+            auto_route = True
         else:  # directory, file, script, executable, url, or multi_launcher
+            auto_route = True
             if parent_id is None:
                 status_area.update("A valid parent Workspace or Folder is required.")
                 return
@@ -478,6 +476,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     icon=icon,
                     is_favorite=is_favorite,
                     is_temporary=is_temporary,
+                    auto_layout=auto_layout,
+                    auto_route=auto_route,
                 )
                 ml_service.create_launcher(
                     name=name,
@@ -500,6 +500,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     icon=icon,
                     is_favorite=is_favorite,
                     is_temporary=is_temporary,
+                    auto_layout=auto_layout,
+                    auto_route=auto_route,
                 )
                 self.dismiss(new_node.id)
             except NodeServiceError as e:

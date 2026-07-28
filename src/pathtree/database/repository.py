@@ -9,6 +9,7 @@ from pathtree.models.launch_profile import LaunchProfile
 from pathtree.models.multi_launcher import MultiLauncher, MultiLauncherItem
 from pathtree.models.node import Node
 from pathtree.models.pin import Pin
+from pathtree.models.resource_reference import ResourceReference
 
 
 class RepositoryCycleError(Exception):
@@ -554,6 +555,85 @@ class LaunchProfileRepository:
         if profile:
             try:
                 self.session.delete(profile)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
+        return False
+
+
+class ResourceReferenceRepository:
+    """Repository for managing ResourceReference persistence."""
+
+    def __init__(self, session: Session) -> None:
+        """Initialize the repository with a database session."""
+        self.session = session
+
+    def create(self, ref: ResourceReference) -> ResourceReference:
+        """Create a new ResourceReference in the database."""
+        try:
+            self.session.add(ref)
+            self.session.commit()
+            self.session.refresh(ref)
+            return ref
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
+
+    def get_by_id(self, id: uuid.UUID) -> ResourceReference | None:
+        """Retrieve a ResourceReference by its UUID."""
+        return self.session.get(ResourceReference, id)
+
+    def get_by_reference_node_id(
+        self, reference_node_id: uuid.UUID
+    ) -> ResourceReference | None:
+        """Retrieve a ResourceReference by its Reference Node UUID."""
+        statement = select(ResourceReference).where(
+            ResourceReference.reference_node_id == reference_node_id
+        )
+        return self.session.exec(statement).first()
+
+    def list_all(self) -> Sequence[ResourceReference]:
+        """Retrieve all ResourceReference records."""
+        statement = select(ResourceReference)
+        return self.session.exec(statement).all()
+
+    def update(self, ref: ResourceReference) -> ResourceReference:
+        """Update an existing ResourceReference in the database."""
+        from datetime import UTC, datetime
+
+        ref.updated_at = datetime.now(UTC)
+        try:
+            self.session.add(ref)
+            self.session.commit()
+            self.session.refresh(ref)
+            return ref
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
+
+    def delete(self, id: uuid.UUID) -> bool:
+        """Delete a ResourceReference by its UUID."""
+        ref = self.get_by_id(id)
+        if ref:
+            try:
+                self.session.delete(ref)
                 self.session.commit()
                 return True
             except IntegrityError as e:

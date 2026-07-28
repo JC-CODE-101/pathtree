@@ -25,6 +25,39 @@ class NodeDetailsPanel(Static):
             self.update(empty_message)
             return
 
+        if node.node_kind == "resource" and node.resource_type == "reference":
+            # Resolve reference service dynamically from screen
+            try:
+                ref_service = self.screen.reference_service
+                is_broken = ref_service.is_broken(node.id)
+                if is_broken:
+                    content = (
+                        f"[bold red]Reference Status: BROKEN[/bold red]\n"
+                        f"[bold]Name:[/bold] {node.name}\n"
+                        f"[bold]Type:[/bold] reference\n"
+                        f"[bold]Original Resource:[/bold] [italic]Missing/Deleted[/italic]\n\n"
+                        f"[yellow]To resolve, open actions [o] and choose Reconnect Reference.[/yellow]"
+                    )
+                else:
+                    orig = ref_service.get_original_node(node.id)
+                    orig_type = (
+                        orig.resource_type if orig.resource_type else orig.node_kind
+                    )
+                    content = (
+                        f"[bold green]Reference Status: ACTIVE[/bold green]\n"
+                        f"[bold]Name:[/bold] {node.name}\n"
+                        f"[bold]Type:[/bold] reference\n"
+                        f"[bold]Original Name:[/bold] {orig.name}\n"
+                        f"[bold]Original Type:[/bold] {orig_type}\n"
+                        f"[bold]Original Path:[/bold] {orig.path or 'N/A'}\n"
+                        f"[bold]Description:[/bold] {node.description or orig.description or 'N/A'}"
+                    )
+                self.update(content)
+                return
+            except Exception as e:
+                self.update_error(str(e))
+                return
+
         if node.node_kind == "resource" and node.resource_type == "multi_launcher":
             from pathtree.database.repository import (
                 LaunchProfileRepository,

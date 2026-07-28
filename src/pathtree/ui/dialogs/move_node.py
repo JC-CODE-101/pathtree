@@ -69,25 +69,12 @@ class MoveNodeDialog(ModalScreen[bool]):
             raise ValueError(f"Node {node_id} not found.")
 
     def compose(self) -> ComposeResult:
-        # Generate parent choices excluding self and descendants
-        raw_choices = self.node_service.get_parent_choices(exclude_node_id=self.node_id)
-
-        parent_choices = []
-        if self.node.node_kind == "workspace":
-            # Workspace can only move to Root (parent_id = None)
-            for label, val_id in raw_choices:
-                if val_id is None:
-                    parent_choices.append((label, val_id))
-        else:
-            # Folder and Directory: Workspace/Folder only, Root excluded
-            for label, val_id in raw_choices:
-                if val_id is not None:
-                    parent_node = self.node_service.get_node(val_id)
-                    if parent_node is not None and parent_node.node_kind in (
-                        "workspace",
-                        "folder",
-                    ):
-                        parent_choices.append((label, val_id))
+        parent_choices = self.node_service.get_valid_parent_choices(
+            self.node.node_kind,
+            self.node.resource_type,
+            exclude_node_id=self.node_id,
+            current_parent_id=self.node.parent_id,
+        )
 
         # Look up current parent label if exists
         current_parent_label = "Root"
@@ -110,7 +97,10 @@ class MoveNodeDialog(ModalScreen[bool]):
                 yield Select(
                     parent_choices,
                     value=self.node.parent_id,
-                    allow_blank=(self.node.node_kind == "workspace"),
+                    allow_blank=(
+                        self.node.node_kind == "workspace"
+                        or any(choice[1] is None for choice in parent_choices)
+                    ),
                     id="select-parent",
                 )
 

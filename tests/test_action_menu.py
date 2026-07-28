@@ -57,11 +57,12 @@ async def test_action_menu_opening_for_dir_res(
 
         # Check menu entries are correct
         menu_items = list(app.screen.query(ActionMenuItem))
-        assert len(menu_items) == 4
+        assert len(menu_items) == 5
         labels = [item.action.label for item in menu_items]
         assert "Change Directory" in labels
         assert "Copy Path" in labels
         assert "View Details" in labels
+        assert "Create Reference" in labels
         assert "Pin Node" in labels or "Unpin Node" in labels
 
         # Escape closes the menu
@@ -142,15 +143,17 @@ async def test_action_menu_nav_wrapping(session: Session, tmp_path: Path) -> Non
         await pilot.press("ctrl+j")
         assert menu.highlighted_index == 3
         await pilot.press("j")
+        assert menu.highlighted_index == 4
+        await pilot.press("j")
         assert menu.highlighted_index == 0  # Wraps to 0
 
         # Up/k/Ctrl+K goes to previous
         await pilot.press("k")
-        assert menu.highlighted_index == 3  # Wraps to last (3)
+        assert menu.highlighted_index == 4  # Wraps to last (4)
         await pilot.press("up")
-        assert menu.highlighted_index == 2
+        assert menu.highlighted_index == 3
         await pilot.press("ctrl+k")
-        assert menu.highlighted_index == 1
+        assert menu.highlighted_index == 2
 
         await pilot.press("escape")
 

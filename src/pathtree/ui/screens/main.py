@@ -170,6 +170,29 @@ class MainScreen(Screen[None]):
                 ),
             )
 
+        from pathtree.actions.reference import ReferenceActionProvider
+
+        self.action_registry.register(
+            "resource",
+            "reference",
+            ReferenceActionProvider(self.node_service),
+        )
+
+    @property
+    def reference_service(self):
+        """Lazily initialize the reference service to protect against mocked dependencies in tests."""
+        if not hasattr(self, "_reference_service_lazy"):
+            from pathtree.database.repository import ResourceReferenceRepository
+            from pathtree.services.resource_reference_service import (
+                ResourceReferenceService,
+            )
+
+            self._reference_service_lazy = ResourceReferenceService(
+                self.node_service,
+                ResourceReferenceRepository(self.node_service.repository.session),
+            )
+        return self._reference_service_lazy
+
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""
         yield Header()
@@ -362,6 +385,18 @@ class MainScreen(Screen[None]):
                 )
                 actions.extend(provider.get_available_actions(context))
 
+            # Dynamically inject Create Reference for any real resource (not reference itself)
+            if node.resource_type != "reference":
+                from pathtree.actions.base import ResourceAction
+
+                actions.append(
+                    ResourceAction(
+                        id="create_reference",
+                        label="Create Reference",
+                        description="Create a reference to this resource in another workspace or folder",
+                    )
+                )
+
         # Dynamically append dynamic Pin/Unpin actions based on current pin state
         from pathtree.actions.base import ResourceAction
 
@@ -395,6 +430,108 @@ class MainScreen(Screen[None]):
                     self.pin_service.unpin_node(node.id)
                     self.app.notify(f'Unpinned "{node.name}"')
                     self.refresh_tree(selected_node_id=node.id)
+                elif result.action_id == "create_reference":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree()
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            original_node_id=node.id,
+                            mode="create",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "reconnect":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            reference_node_id=node.id,
+                            mode="reconnect",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "copy_reference_to_workspace":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree()
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            reference_node_id=node.id,
+                            mode="copy",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "move_reference_to_workspace":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            reference_node_id=node.id,
+                            mode="move",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "rename_reference":
+                    from pathtree.ui.dialogs.edit_node import EditNodeDialog
+
+                    def on_rename_finished(success: bool) -> None:
+                        if success:
+                            self.app.notify(f'Updated reference "{node.name}"')
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        EditNodeDialog(self.node_service, node.id),
+                        callback=on_rename_finished,
+                    )
+                elif result.action_id == "move_reference":
+                    from pathtree.ui.dialogs.move_node import MoveNodeDialog
+
+                    def on_move_finished(success: bool) -> None:
+                        if success:
+                            self.app.notify(f'Moved reference "{node.name}"')
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        MoveNodeDialog(self.node_service, node.id),
+                        callback=on_move_finished,
+                    )
                 else:
                     if provider and context:
                         self.execute_action(result.action_id, provider, context)
@@ -614,6 +751,22 @@ class MainScreen(Screen[None]):
         if result.message:
             self.app.notify(result.message)
 
+        # Handle specific return outputs from Reference provider
+        if (
+            context.node.node_kind == "resource"
+            and context.node.resource_type == "reference"
+        ):
+            if (
+                action_id in ("open", "locate_original")
+                and result.output_value is not None
+            ):
+                target_orig_id = result.output_value
+                if action_id == "open":
+                    self.activate_node(target_orig_id)
+                elif action_id == "locate_original":
+                    self.refresh_tree(selected_node_id=target_orig_id)
+                return
+
         # Render output_value according to the typed target
         if result.target == ResourceActionResultTarget.DETAILS:
             if result.output_value is not None:
@@ -633,6 +786,19 @@ class MainScreen(Screen[None]):
         node = self.node_service.get_node(node_id)
         if not node:
             details_panel.update_error(f"Node {node_id} does not exist.")
+            return
+
+        # --- Automatic delegation of Reference nodes to their original targets ---
+        if node.node_kind == "resource" and node.resource_type == "reference":
+            ref = self.reference_service.get_reference_by_node_id(node_id)
+            if not ref or ref.original_node_id is None:
+                details_panel.update_error("Broken Reference")
+                return
+            orig_node = self.node_service.get_node(ref.original_node_id)
+            if not orig_node:
+                details_panel.update_error("Broken Reference")
+                return
+            self.activate_node(orig_node.id)
             return
 
         provider = self.action_registry.get_provider(node.node_kind, node.resource_type)
