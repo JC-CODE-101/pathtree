@@ -42,10 +42,15 @@ class MainScreen(Screen[None]):
     }
     #tree-view {
         width: 65%;
+        min-width: 65%;
+        max-width: 65%;
         border-right: solid $accent;
     }
     #details-panel {
         width: 35%;
+        min-width: 35%;
+        max-width: 35%;
+        overflow-x: hidden;
         padding: 1;
     }
     """

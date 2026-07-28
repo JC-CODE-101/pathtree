@@ -767,3 +767,71 @@ async def test_details_panel_rendering(session):
         assert "Total Delay: 0 ms" in content
         assert "1. P1 [100 ms]" in content
         assert "2. P2 [disabled]" in content
+
+
+@pytest.mark.asyncio
+async def test_layout_stability_regression(session):
+    """Verify that selecting a Multi Launcher with extremely long name profile does not shift the vertical divider."""
+    node_repo = NodeRepository(session)
+    node_service = NodeService(node_repo)
+    ws = node_service.create_node(name="WS", node_kind="workspace")
+    script = node_service.create_node(
+        name="Build Script",
+        node_kind="resource",
+        resource_type="script",
+        parent_id=ws.id,
+        path=__file__,
+    )
+
+    lp_repo = LaunchProfileRepository(session)
+    lp_service = LaunchProfileService(node_service, lp_repo)
+    # Extremely long name
+    long_name = "P1" * 100
+    lp1 = lp_service.create_profile(
+        name=long_name, target_node_id=script.id, arguments=[]
+    )
+
+    ml_repo = MultiLauncherRepository(session)
+    ml_service = MultiLauncherService(node_service, lp_service, ml_repo)
+    ml = ml_service.create_launcher(
+        name="Launcher A", workspace_id=ws.id, description="Details test"
+    )
+    ml_service.add_item(ml.id, lp1.id, delay_ms=100)
+
+    from pathtree.ui.app import PathTreeApp
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        tree_view = app.screen.query_one("#tree-view")
+        details_panel = app.screen.query_one("#details-panel")
+
+        # Record widths on workspace node selection
+        init_tree_width = tree_view.size.width
+        init_details_width = details_panel.size.width
+
+        # Ensure layout widths are positive integers
+        assert init_tree_width > 0
+        assert init_details_width > 0
+
+        # Now select the Multi Launcher node
+        await pilot.press("l")  # Expand WS
+        await pilot.press("j")  # Move to Build Script
+        await pilot.press("j")  # Move to Launch Profiles
+        await pilot.press("j")  # Move to Multi Launchers
+        await pilot.press("l")  # Expand Multi Launchers
+        await pilot.press("j")  # Move to Launcher A
+        await pilot.pause(0.01)
+
+        # Verify cursor is indeed on Launcher A
+        assert "Launcher A" in str(tree_view.cursor_node.label)
+
+        # Verify the details content has the long name
+        content = details_panel.render().plain
+        assert long_name in content
+
+        # Check pane widths remain exactly the same as initial proportions (no layout shift!)
+        assert tree_view.size.width == init_tree_width
+        assert details_panel.size.width == init_details_width
