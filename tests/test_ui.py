@@ -1897,7 +1897,7 @@ async def test_add_node_dialog_visibility_regression(session: Session) -> None:
 
     node_service = NodeService(NodeRepository(session))
     app = PathTreeApp(node_service=node_service)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 60)) as pilot:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
@@ -2442,7 +2442,7 @@ async def test_add_node_dialog_vim_navigation(session: Session) -> None:
     """
     node_service = NodeService(NodeRepository(session))
     app = PathTreeApp(node_service=node_service)
-    async with app.run_test() as pilot:
+    async with app.run_test(size=(80, 60)) as pilot:
         while app.screen.id != "main-screen":
             await pilot.pause(0.01)
         await pilot.pause(0.01)
@@ -2491,12 +2491,22 @@ async def test_add_node_dialog_vim_navigation(session: Session) -> None:
         await pilot.pause(0.01)
         assert dialog.selected_type == "url"
 
-        # Test wrapping with 'j' moves URL -> Workspace
+        # Test 'j' moves URL -> Multi Launcher
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "multi_launcher"
+
+        # Test wrapping with 'j' moves Multi Launcher -> Workspace
         await pilot.press("j")
         await pilot.pause(0.01)
         assert dialog.selected_type == "workspace"
 
-        # Test 'k' moves Workspace -> URL (wrapping)
+        # Test 'k' moves Workspace -> Multi Launcher (wrapping)
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "multi_launcher"
+
+        # Test 'k' moves Multi Launcher -> URL
         await pilot.press("k")
         await pilot.pause(0.01)
         assert dialog.selected_type == "url"

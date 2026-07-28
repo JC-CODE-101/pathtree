@@ -139,6 +139,12 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
 
     def compose(self) -> ComposeResult:
         parent_choices = self.node_service.get_parent_choices()
+        valid_parent_ids = {choice[1] for choice in parent_choices}
+        initial_parent_value = (
+            self.default_parent_id
+            if self.default_parent_id in valid_parent_ids
+            else None
+        )
 
         with Container(id="dialog-container"):
             yield Label("Add New Node", classes="title")
@@ -153,6 +159,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     yield RadioButton("Script", id="radio-script")
                     yield RadioButton("Executable", id="radio-executable")
                     yield RadioButton("URL", id="radio-url")
+                    yield RadioButton("Multi Launcher", id="radio-multi-launcher")
 
             with Vertical(classes="field-container"):
                 yield Label("Name *", classes="field-label")
@@ -184,7 +191,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                 yield Label("Parent", classes="field-label")
                 yield Select(
                     parent_choices,
-                    value=self.default_parent_id,
+                    value=initial_parent_value,
                     allow_blank=False,
                     id="select-parent",
                 )
@@ -219,6 +226,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             self.selected_type = "executable"
         elif radio_id == "radio-url":
             self.selected_type = "url"
+        elif radio_id == "radio-multi-launcher":
+            self.selected_type = "multi_launcher"
 
         icon_picker = self.query_one(IconPicker)
         if self.selected_type == "workspace":
@@ -235,6 +244,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             icon_picker.set_node_type("resource", "executable")
         elif self.selected_type == "url":
             icon_picker.set_node_type("resource", "url")
+        elif self.selected_type == "multi_launcher":
+            icon_picker.set_node_type("resource", "multi_launcher")
 
         # Update path autocomplete mode based on selection immediately
         try:
@@ -396,40 +407,103 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             resource_type = None
             path = None
             is_temporary = False
-        else:  # directory, file, script, executable, or url
+        else:  # directory, file, script, executable, url, or multi_launcher
             if parent_id is None:
                 status_area.update("A valid parent Workspace or Folder is required.")
                 return
             node_kind = "resource"
-            resource_type = (
-                self.selected_type
-            )  # "directory", "file", "script", "executable", or "url"
-            path_val = self.query_one("#input-path", Input).value or None
-            path = None
-            if path_val is not None:
-                if resource_type == "url":
-                    path = path_val.strip()
-                else:
-                    from pathtree.utils.path import normalize_path
+            resource_type = self.selected_type
 
-                    path = normalize_path(path_val)
-            is_temporary = self.query_one("#checkbox-temporary", Checkbox).value
+            if resource_type == "multi_launcher":
+                path = None
+                is_temporary = False
+            else:
+                path_val = self.query_one("#input-path", Input).value or None
+                path = None
+                if path_val is not None:
+                    if resource_type == "url":
+                        path = path_val.strip()
+                    else:
+                        from pathtree.utils.path import normalize_path
 
-        try:
-            new_node = self.node_service.create_node(
-                name=name,
-                node_kind=node_kind,
-                resource_type=resource_type,
-                parent_id=parent_id,
-                path=path,
-                description=description,
-                icon=icon,
-                is_favorite=is_favorite,
-                is_temporary=is_temporary,
+                        path = normalize_path(path_val)
+                is_temporary = self.query_one("#checkbox-temporary", Checkbox).value
+
+        if resource_type == "multi_launcher":
+            # Instantiate MultiLauncherService on the fly
+            from pathtree.database.repository import (
+                LaunchProfileRepository,
+                MultiLauncherRepository,
             )
-            self.dismiss(new_node.id)
-        except NodeServiceError as e:
-            status_area.update(str(e))
+            from pathtree.services.launch_profile_service import (
+                LaunchProfileService,
+            )
+            from pathtree.services.multi_launcher_service import (
+                MultiLauncherService,
+            )
+
+            lp_repo = LaunchProfileRepository(self.node_service.repository.session)
+            lp_service = LaunchProfileService(self.node_service, lp_repo)
+            ml_repo = MultiLauncherRepository(self.node_service.repository.session)
+            ml_service = MultiLauncherService(self.node_service, lp_service, ml_repo)
+
+            # Find originating workspace of parent
+            parent_node = self.node_service.get_node(parent_id)
+            workspace_id = None
+            curr = parent_node
+            while curr is not None:
+                if curr.node_kind == "workspace":
+                    workspace_id = curr.id
+                    break
+                curr = self.node_service.get_node(curr.parent_id)
+
+            if workspace_id is None:
+                status_area.update("Workspace is required to create a Multi Launcher.")
+                return
+
+            try:
+                # Force parent_id to be workspace's "Multi Launchers" system group
+                ml_group = self.node_service.get_or_create_system_group(
+                    workspace_id, "multi_launchers", "Multi Launchers"
+                )
+                parent_id = ml_group.id
+
+                new_node = self.node_service.create_node(
+                    name=name,
+                    node_kind=node_kind,
+                    resource_type=resource_type,
+                    parent_id=parent_id,
+                    path=path,
+                    description=description,
+                    icon=icon,
+                    is_favorite=is_favorite,
+                    is_temporary=is_temporary,
+                )
+                ml_service.create_launcher(
+                    name=name,
+                    workspace_id=workspace_id,
+                    description=description,
+                    node_id=new_node.id,
+                )
+                self.dismiss(new_node.id)
+            except NodeServiceError as e:
+                status_area.update(str(e))
+        else:
+            try:
+                new_node = self.node_service.create_node(
+                    name=name,
+                    node_kind=node_kind,
+                    resource_type=resource_type,
+                    parent_id=parent_id,
+                    path=path,
+                    description=description,
+                    icon=icon,
+                    is_favorite=is_favorite,
+                    is_temporary=is_temporary,
+                )
+                self.dismiss(new_node.id)
+            except NodeServiceError as e:
+                status_area.update(str(e))
 
     def action_cancel(self) -> None:
         self.dismiss(None)
