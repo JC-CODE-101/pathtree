@@ -1211,6 +1211,7 @@ class NodeService:
         resource_type: str | None = None,
         exclude_node_id: uuid.UUID | None = None,
         current_parent_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> list[tuple[str, uuid.UUID | None]]:
         if node_kind == "workspace":
             return [("Root", None)]
@@ -1233,6 +1234,17 @@ class NodeService:
             node = tree_node.node
             if exclude_node_id is not None and node.id == exclude_node_id:
                 return  # Skip self and all descendants
+
+            # If workspace_id is specified, filter by that workspace context
+            if workspace_id is not None:
+                # If node is a workspace node other than target workspace, skip it
+                if node.node_kind == "workspace" and node.id != workspace_id:
+                    return
+                # For non-workspace nodes, verify they descend from target workspace
+                if node.node_kind != "workspace":
+                    node_ws = self._find_workspace_for_node(node.id)
+                    if not node_ws or node_ws.id != workspace_id:
+                        return
 
             # Construct label
             if parent_label == "Root":

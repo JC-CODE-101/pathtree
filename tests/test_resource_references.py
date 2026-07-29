@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from sqlmodel import Session
 
@@ -497,3 +499,44 @@ def test_managed_group_protection_constraints(
     # Rejects movement
     with pytest.raises(ValidationError, match="Managed system groups cannot be moved"):
         node_service.move_node(sys_group.id, ws.id)
+
+
+def assert_node_belongs_to_workspace(
+    node_service: NodeService, node_id: uuid.UUID, workspace_id: uuid.UUID
+) -> None:
+    """Diagnostic assertion helper ensuring node belongs to expected workspace."""
+    ws = node_service._find_workspace_for_node(node_id)
+    assert ws is not None, f"Node {node_id} has no workspace ancestor"
+    assert ws.id == workspace_id, (
+        f"Node {node_id} belongs to workspace {ws.id}, "
+        f"expected workspace {workspace_id}"
+    )
+
+
+def test_service_managed_group_lookups_scoped_by_workspace(
+    node_service: NodeService,
+) -> None:
+    """Verify that managed group queries are strictly scoped by workspace_id."""
+    ws1 = node_service.create_node(name="WS1", node_kind="workspace", auto_layout=True)
+    ws2 = node_service.create_node(name="WS2", node_kind="workspace", auto_layout=True)
+
+    # Scoped custom group lookups
+    cg1 = node_service.get_custom_group(ws1.id)
+    cg2 = node_service.get_custom_group(ws2.id)
+    assert cg1.id != cg2.id
+    assert cg1.parent_id == ws1.id
+    assert cg2.parent_id == ws2.id
+
+    # Scoped system group lookups
+    sg1 = node_service.get_system_group(ws1.id)
+    sg2 = node_service.get_system_group(ws2.id)
+    assert sg1.id != sg2.id
+    assert sg1.parent_id == ws1.id
+    assert sg2.parent_id == ws2.id
+
+    # Scoped System subsection lookups
+    sub1 = node_service.get_system_subsection(ws1.id, "script")
+    sub2 = node_service.get_system_subsection(ws2.id, "script")
+    assert sub1.id != sub2.id
+    assert sub1.parent_id == sg1.id
+    assert sub2.parent_id == sg2.id

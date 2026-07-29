@@ -369,6 +369,10 @@ class MainScreen(Screen[None]):
             details_panel.update_error("Node not found.")
             return
 
+        if node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be modified.", severity="error")
+            return
+
         actions = []
         provider = None
         context = None
@@ -966,11 +970,14 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
+        node_id = tree.cursor_node.data
+        node = self.node_service.get_node(node_id)
+        if node is not None and node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be edited.", severity="error")
+            return
+
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
-        node_id = tree.cursor_node.data
-
-        node = self.node_service.get_node(node_id)
         if (
             node is not None
             and node.node_kind == "resource"
@@ -1025,9 +1032,14 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
+        node_id = tree.cursor_node.data
+        node = self.node_service.get_node(node_id)
+        if node is not None and node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be moved.", severity="error")
+            return
+
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
-        node_id = tree.cursor_node.data
 
         def handle_move_finished(success: bool) -> None:
             if success:
@@ -1051,13 +1063,17 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
-        # Capture expansion state before opening the dialog
-        captured_expanded_node_ids = tree.get_expanded_node_ids()
-
         node_id = tree.cursor_node.data
         node = self.node_service.get_node(node_id)
         if node is None:
             return
+
+        if node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be deleted.", severity="error")
+            return
+
+        # Capture expansion state before opening the dialog
+        captured_expanded_node_ids = tree.get_expanded_node_ids()
 
         # Determine fallbacks: next sibling, else previous sibling, else parent,
         # else None (first visible root will be handled by refresh_tree).

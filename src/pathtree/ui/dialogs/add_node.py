@@ -137,11 +137,18 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         # We start with workspace selected by default
         self.selected_type = "workspace"
 
+        self.workspace_id = None
+        if default_parent_id is not None:
+            ws_node = self.node_service._find_workspace_for_node(default_parent_id)
+            if ws_node:
+                self.workspace_id = ws_node.id
+
     def compose(self) -> ComposeResult:
         parent_choices = self.node_service.get_valid_parent_choices(
             self.selected_type,
             self.selected_type,
             current_parent_id=self.default_parent_id,
+            workspace_id=self.workspace_id,
         )
         valid_parent_ids = {
             choice[1] for choice in parent_choices if choice[1] is not None
@@ -320,6 +327,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             self.selected_type,
             self.selected_type,
             current_parent_id=self.default_parent_id,
+            workspace_id=self.workspace_id,
         )
 
         if not valid_choices:
@@ -478,6 +486,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     is_temporary=is_temporary,
                     auto_layout=auto_layout,
                     auto_route=auto_route,
+                    workspace_id=self.workspace_id,
                 )
                 ml_service.create_launcher(
                     name=name,
@@ -502,6 +511,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     is_temporary=is_temporary,
                     auto_layout=auto_layout,
                     auto_route=auto_route,
+                    workspace_id=self.workspace_id,
                 )
                 self.dismiss(new_node.id)
             except NodeServiceError as e:

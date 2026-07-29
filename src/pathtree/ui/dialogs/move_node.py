@@ -69,11 +69,18 @@ class MoveNodeDialog(ModalScreen[bool]):
             raise ValueError(f"Node {node_id} not found.")
 
     def compose(self) -> ComposeResult:
+        workspace_id = None
+        if self.node.node_kind != "workspace":
+            ws_node = self.node_service._find_workspace_for_node(self.node_id)
+            if ws_node:
+                workspace_id = ws_node.id
+
         parent_choices = self.node_service.get_valid_parent_choices(
             self.node.node_kind,
             self.node.resource_type,
             exclude_node_id=self.node_id,
             current_parent_id=self.node.parent_id,
+            workspace_id=workspace_id,
         )
 
         # Look up current parent label if exists
