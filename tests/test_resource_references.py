@@ -1,9 +1,14 @@
 import pytest
 from sqlmodel import Session
 
-from pathtree.database.repository import NodeRepository, ResourceReferenceRepository
+from pathtree.database.repository import (
+    NodeRepository,
+    ResourceReferenceRepository,
+)
 from pathtree.services.node_service import NodeService, ValidationError
-from pathtree.services.resource_reference_service import ResourceReferenceService
+from pathtree.services.resource_reference_service import (
+    ResourceReferenceService,
+)
 
 
 @pytest.fixture(name="node_service")
@@ -21,7 +26,7 @@ def ref_service_fixture(
 
 
 def test_workspace_layout_initialization(node_service: NodeService) -> None:
-    """Test that creating a workspace automatically initializes System and Custom areas."""
+    """Test workspace creation layout initialization of System/Custom."""
     ws = node_service.create_node(
         name="AI Workspace", node_kind="workspace", auto_layout=True
     )
@@ -54,8 +59,10 @@ def test_workspace_layout_initialization(node_service: NodeService) -> None:
     assert roles == expected_roles
 
 
-def test_automatic_placement_real_resources(node_service: NodeService) -> None:
-    """Test that creating real resources routes them to System subsections automatically."""
+def test_automatic_placement_real_resources(
+    node_service: NodeService,
+) -> None:
+    """Test that real resources route to System subsections automatically."""
     ws = node_service.create_node(
         name="AI Workspace", node_kind="workspace", auto_layout=True
     )
@@ -92,7 +99,7 @@ def test_automatic_placement_real_resources(node_service: NodeService) -> None:
 
 
 def test_automatic_placement_folders(node_service: NodeService) -> None:
-    """Test that creating folder nodes routes them to Custom group automatically."""
+    """Test that folder nodes route to Custom group automatically."""
     ws = node_service.create_node(
         name="AI Workspace", node_kind="workspace", auto_layout=True
     )
@@ -111,8 +118,10 @@ def test_automatic_placement_folders(node_service: NodeService) -> None:
     assert parent_node.system_role == "custom"
 
 
-def test_prevent_manual_creation_in_system(node_service: NodeService) -> None:
-    """Test that folders and references cannot be manually created inside System area."""
+def test_prevent_manual_creation_in_system(
+    node_service: NodeService,
+) -> None:
+    """Test that folders and references cannot be created in System area."""
     ws = node_service.create_node(
         name="AI Workspace", node_kind="workspace", auto_layout=True
     )
@@ -219,7 +228,7 @@ def test_cross_workspace_references(
 def test_broken_references_and_reconnection(
     node_service: NodeService, ref_service: ResourceReferenceService
 ) -> None:
-    """Test reference behavior when original node is deleted and reconnection logic."""
+    """Test reference broken state and reconnection logic."""
     ws = node_service.create_node(
         name="Workspace", node_kind="workspace", auto_layout=True
     )
@@ -323,7 +332,7 @@ def test_delete_reference_does_not_delete_original(
 
 
 def test_centralized_hierarchy_rules(node_service: NodeService) -> None:
-    """Verify centralized hierarchy selection rules returned by get_valid_parent_choices."""
+    """Verify hierarchy selection rules from get_valid_parent_choices."""
     ws = node_service.create_node(name="WS", node_kind="workspace", auto_layout=True)
     custom_group = next(
         c for c in node_service.load_children(ws.id) if c.name == "Custom"
@@ -396,8 +405,10 @@ def test_move_node_routing_and_protection(node_service: NodeService) -> None:
     assert moved.parent_id == ws2_urls.id
 
 
-def test_current_parent_robustness_and_stale_uuids(node_service: NodeService) -> None:
-    """Verify Select parent options load robustly with current parent fallback even if not selectable."""
+def test_current_parent_robustness_and_stale_uuids(
+    node_service: NodeService,
+) -> None:
+    """Verify parent choices options load robustly with current fallback."""
     ws = node_service.create_node(name="WS", node_kind="workspace", auto_layout=True)
     system_group = next(
         c for c in node_service.load_children(ws.id) if c.name == "System"
@@ -408,11 +419,81 @@ def test_current_parent_robustness_and_stale_uuids(node_service: NodeService) ->
         if c.system_role == "directories"
     )
 
-    # If we request choices for a folder, but its current parent is system_group (stale/legacy)
+    # If we request choices for folder with legacy parent_id
     choices = node_service.get_valid_parent_choices(
         node_kind="folder",
         current_parent_id=dir_group.id,
     )
-    # The dir_group.id must be prepended robustly so Select value matches!
+    # The dir_group.id must be prepended robustly
     assert choices[0][1] == dir_group.id
     assert "Current:" in choices[0][0]
+
+
+def test_multi_workspace_routing_accuracy(node_service: NodeService) -> None:
+    """Verify that nodes land in the selected workspace only."""
+    ws1 = node_service.create_node(name="WS1", node_kind="workspace", auto_layout=True)
+    ws2 = node_service.create_node(name="WS2", node_kind="workspace", auto_layout=True)
+    ws3 = node_service.create_node(name="WS3", node_kind="workspace", auto_layout=True)
+
+    # 1. Create folder explicitly on WS2
+    folder_ws2 = node_service.create_node(
+        name="WS2 Folder",
+        node_kind="folder",
+        workspace_id=ws2.id,
+    )
+    ws2_custom = next(
+        c for c in node_service.load_children(ws2.id) if c.name == "Custom"
+    )
+    assert folder_ws2.parent_id == ws2_custom.id
+
+    # 2. Create URL explicitly on WS3
+    url_ws3 = node_service.create_node(
+        name="WS3 URL",
+        node_kind="resource",
+        resource_type="url",
+        path="https://ws3.com",
+        workspace_id=ws3.id,
+    )
+    ws3_sys = next(c for c in node_service.load_children(ws3.id) if c.name == "System")
+    ws3_urls = next(
+        c for c in node_service.load_children(ws3_sys.id) if c.system_role == "urls"
+    )
+    assert url_ws3.parent_id == ws3_urls.id
+
+    # 3. Create script explicitly on WS1
+    script_ws1 = node_service.create_node(
+        name="WS1 Script",
+        node_kind="resource",
+        resource_type="script",
+        path=__file__,  # must exist
+        workspace_id=ws1.id,
+    )
+    ws1_sys = next(c for c in node_service.load_children(ws1.id) if c.name == "System")
+    ws1_scripts = next(
+        c for c in node_service.load_children(ws1_sys.id) if c.system_role == "scripts"
+    )
+    assert script_ws1.parent_id == ws1_scripts.id
+
+
+def test_managed_group_protection_constraints(
+    node_service: NodeService,
+) -> None:
+    """Verify that users cannot modify, move, or delete system groups."""
+    ws = node_service.create_node(name="WS", node_kind="workspace", auto_layout=True)
+    sys_group = next(c for c in node_service.load_children(ws.id) if c.name == "System")
+
+    # Rejects update/modification
+    with pytest.raises(
+        ValidationError, match="Managed system groups cannot be modified"
+    ):
+        node_service.update_node(sys_group.id, name="Custom Renamed")
+
+    # Rejects deletion
+    with pytest.raises(
+        ValidationError, match="Managed system groups cannot be deleted"
+    ):
+        node_service.delete_node(sys_group.id)
+
+    # Rejects movement
+    with pytest.raises(ValidationError, match="Managed system groups cannot be moved"):
+        node_service.move_node(sys_group.id, ws.id)

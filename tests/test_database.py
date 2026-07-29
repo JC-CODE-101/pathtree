@@ -43,7 +43,7 @@ def test_sqlite_pragmas(engine):
 
 
 def test_user_version():
-    """Test user_version is correctly queried and set to 5."""
+    """Test user_version is correctly queried and set to 6."""
     # Use a temp file to ensure clean initialization behavior
     fd, temp_path_str = tempfile.mkstemp()
     os.close(fd)
@@ -57,7 +57,7 @@ def test_user_version():
         with Session(engine) as session:
             connection = session.connection()
             version = connection.execute(text("PRAGMA user_version;")).scalar()
-            assert version == 5
+            assert version == 6
 
             # Check that table exists
             cursor = connection.execute(
@@ -68,12 +68,12 @@ def test_user_version():
             )
             assert cursor.first() is not None
 
-        # Re-run init_db and ensure version is still 5
+        # Re-run init_db and ensure version is still 6
         init_db(engine)
         with Session(engine) as session:
             connection = session.connection()
             version = connection.execute(text("PRAGMA user_version;")).scalar()
-            assert version == 5
+            assert version == 6
 
     finally:
         if temp_path.exists():
@@ -312,3 +312,109 @@ def test_repository_transaction_safety_and_rollback(session):
     node2.name = "Node 2 Restored"
     updated = repo.update(node2)
     assert updated.name == "Node 2 Restored"
+
+
+def test_resource_reference_repository(session):
+    """Test ResourceReferenceRepository CRUD and relations."""
+    from pathtree.database.repository import ResourceReferenceRepository
+    from pathtree.models.resource_reference import ResourceReference
+
+    node_repo = NodeRepository(session)
+    ref_repo = ResourceReferenceRepository(session)
+
+    # Create original and reference nodes
+    orig = node_repo.create(
+        Node(name="Original File", node_kind="resource", resource_type="file")
+    )
+    ref_node = node_repo.create(
+        Node(name="Ref Node", node_kind="resource", resource_type="reference")
+    )
+
+    # Create Reference entry
+    ref = ref_repo.create(
+        ResourceReference(
+            reference_node_id=ref_node.id,
+            original_node_id=orig.id,
+        )
+    )
+
+    assert ref.id is not None
+    assert ref.reference_node_id == ref_node.id
+    assert ref.original_node_id == orig.id
+
+    # Retrieve
+    fetched = ref_repo.get_by_id(ref.id)
+    assert fetched is not None
+    assert fetched.id == ref.id
+
+    fetched_by_node = ref_repo.get_by_reference_node_id(ref_node.id)
+    assert fetched_by_node is not None
+    assert fetched_by_node.id == ref.id
+
+    # List all
+    all_refs = ref_repo.list_all()
+    assert len(all_refs) == 1
+
+    # Update
+    ref.original_node_id = None
+    updated = ref_repo.update(ref)
+    assert updated.original_node_id is None
+
+    # Delete
+    assert ref_repo.delete(ref.id) is True
+    assert ref_repo.get_by_id(ref.id) is None
+
+
+def test_legacy_workspaces_migration(session):
+    """Test that existing legacy workspaces and their resources migrate deterministically."""
+    from pathtree.database.connection import migrate_existing_workspaces
+
+    node_repo = NodeRepository(session)
+
+    # 1. Create a legacy workspace and some children directly under it
+    ws = node_repo.create(Node(name="Legacy WS", node_kind="workspace"))
+    folder = node_repo.create(
+        Node(name="Legacy Folder", node_kind="folder", parent_id=ws.id)
+    )
+    url_res = node_repo.create(
+        Node(
+            name="Legacy URL",
+            node_kind="resource",
+            resource_type="url",
+            parent_id=ws.id,
+        )
+    )
+    script_res = node_repo.create(
+        Node(
+            name="Legacy Script",
+            node_kind="resource",
+            resource_type="script",
+            parent_id=ws.id,
+        )
+    )
+
+    # 2. Run deterministic migration on connection/session
+    migrate_existing_workspaces(session.connection())
+    session.expire_all()
+
+    # 3. Check that the System and Custom groups exist, and children have been relocated
+    children = node_repo.list_children(ws.id)
+    assert len(children) == 2
+    system_group = next(c for c in children if c.name == "System")
+    custom_group = next(c for c in children if c.name == "Custom")
+
+    # Folder must be moved under Custom
+    folder_updated = node_repo.get_by_id(folder.id)
+    assert folder_updated.parent_id == custom_group.id
+
+    # URL must be moved under System / URLs
+    url_updated = node_repo.get_by_id(url_res.id)
+    url_parent = node_repo.get_by_id(url_updated.parent_id)
+    assert url_parent.node_kind == "system_group"
+    assert url_parent.system_role == "urls"
+
+    # Script must be moved under System / Scripts
+    script_updated = node_repo.get_by_id(script_res.id)
+    script_parent = node_repo.get_by_id(script_updated.parent_id)
+    assert script_parent.node_kind == "system_group"
+    assert script_parent.system_role == "scripts"

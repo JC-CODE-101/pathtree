@@ -2235,7 +2235,7 @@ async def test_add_node_dialog_autocomplete_enter_acceptance_and_creation(
         assert app.screen.id == "main-screen"
         from sqlmodel import select
 
-        assert len(session.exec(select(Node)).all()) == 4
+        assert len(session.exec(select(Node)).all()) == 2
 
 
 @pytest.mark.asyncio
