@@ -274,10 +274,11 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
         # 4. Move submission with enter key does not activate
         # Move "New Folder Renamed" to "New WS"
         new_ws = next(n for n in node_service.load_root_nodes() if n.name == "New WS")
+        new_ws_custom = node_service.get_custom_group(new_ws.id)
         await pilot.press("m")
         assert isinstance(app.screen, MoveNodeDialog)
         dialog = app.screen
-        dialog.query_one("#select-parent").value = new_ws.id
+        dialog.query_one("#select-parent").value = new_ws_custom.id
         dialog.query_one("#btn-move").focus()
         await pilot.press("enter")
         await pilot.pause(0.05)

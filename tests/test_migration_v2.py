@@ -108,16 +108,16 @@ def create_v1_db_with_test_data(db_path: Path):
     return id1, id2, id3
 
 
-def test_fresh_database_creates_version_5(tmp_path):
-    """Verify that a newly created database is initialized at version 5 directly."""
-    db_file = tmp_path / "fresh_v5.db"
+def test_fresh_database_creates_version_6(tmp_path):
+    """Verify that a newly created database is initialized at version 6 directly."""
+    db_file = tmp_path / "fresh_v6.db"
     engine = create_db_engine(db_file)
     init_db(engine)
 
     with Session(engine) as session:
         connection = session.connection()
         version = connection.execute(text("PRAGMA user_version;")).scalar()
-        assert version == 5
+        assert version == 6
 
         # Verify columns exist on nodes
         cursor = connection.execute(text("PRAGMA table_info(nodes);"))
@@ -145,9 +145,9 @@ def test_fresh_database_creates_version_5(tmp_path):
     engine.dispose()
 
 
-def test_migration_v1_to_v5_conversion_rules(tmp_path):
-    """Verify legacy data conversion and structural properties preservation up to v5."""
-    db_file = tmp_path / "migration_v1_to_v5.db"
+def test_migration_v1_to_v6_conversion_rules(tmp_path):
+    """Verify legacy data conversion and structural properties preservation up to v6."""
+    db_file = tmp_path / "migration_v1_to_v6.db"
     id1, id2, id3 = create_v1_db_with_test_data(db_file)
 
     engine = create_db_engine(db_file)
@@ -155,9 +155,9 @@ def test_migration_v1_to_v5_conversion_rules(tmp_path):
 
     with Session(engine) as session:
         connection = session.connection()
-        # Verify version updated to 5
+        # Verify version updated to 6
         version = connection.execute(text("PRAGMA user_version;")).scalar()
-        assert version == 5
+        assert version == 6
 
         # Verify idempotent indexes exist
         cursor = connection.execute(
@@ -191,7 +191,21 @@ def test_migration_v1_to_v5_conversion_rules(tmp_path):
         assert isinstance(node1.created_at, datetime)
         assert isinstance(node1.updated_at, datetime)
 
+        # Verify groups were created under workspace (node1)
+        system_group = next(
+            c for c in repo.list_children(node1.id) if c.name == "System"
+        )
+        custom_group = next(
+            c for c in repo.list_children(node1.id) if c.name == "Custom"
+        )
+        dir_group = next(
+            c
+            for c in repo.list_children(system_group.id)
+            if c.system_role == "directories"
+        )
+
         # Folder Node without path (Folder) -> folder + None
+        # Migrated: now parent is the Custom group!
         node2 = repo.get_by_id(uuid.UUID(hex=id2))
         assert node2 is not None
         assert node2.name == "Folder No Path"
@@ -199,12 +213,13 @@ def test_migration_v1_to_v5_conversion_rules(tmp_path):
         assert node2.resource_type is None
         assert node2.is_favorite is False
         assert node2.is_temporary is False
-        assert node2.parent_id == node1.id
+        assert node2.parent_id == custom_group.id
         assert node2.description == "Folder desc"
         assert node2.icon == "📁"
         assert node2.sort_order == 2
 
         # Folder Node with path (Folder) -> resource + directory
+        # Migrated: now parent is System / Directories!
         node3 = repo.get_by_id(uuid.UUID(hex=id3))
         assert node3 is not None
         assert node3.name == "Folder With Path"
@@ -212,7 +227,7 @@ def test_migration_v1_to_v5_conversion_rules(tmp_path):
         assert node3.resource_type == "directory"
         assert node3.is_favorite is False
         assert node3.is_temporary is False
-        assert node3.parent_id == node2.id
+        assert node3.parent_id == dir_group.id
         assert node3.description == "Folder with path desc"
         assert node3.icon == "📂"
         assert node3.path == "/home/user/path"
@@ -221,12 +236,12 @@ def test_migration_v1_to_v5_conversion_rules(tmp_path):
     engine.dispose()
 
 
-def test_repeated_version_5_startup_no_op(tmp_path):
-    """Verify that repeated startup on a version 5 database is a clean no-op."""
+def test_repeated_version_6_startup_no_op(tmp_path):
+    """Verify that repeated startup on a version 6 database is a clean no-op."""
     db_file = tmp_path / "repeated_startup.db"
     engine = create_db_engine(db_file)
 
-    # First startup (creates fresh v5)
+    # First startup (creates fresh v6)
     init_db(engine)
 
     # Second and third startup (no-op)
@@ -235,33 +250,33 @@ def test_repeated_version_5_startup_no_op(tmp_path):
 
     with Session(engine) as session:
         version = session.connection().execute(text("PRAGMA user_version;")).scalar()
-        assert version == 5
+        assert version == 6
 
     engine.dispose()
 
 
 def test_newer_version_refusal(tmp_path):
-    """Verify that a database with version > 5 is rejected and not modified."""
+    """Verify that a database with version > 6 is rejected and not modified."""
     db_file = tmp_path / "newer_version.db"
 
-    # Create nodes table and set version to 6
+    # Create nodes table and set version to 7
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     cursor.execute("CREATE TABLE nodes (id CHAR(32) PRIMARY KEY);")
-    cursor.execute("PRAGMA user_version = 6;")
+    cursor.execute("PRAGMA user_version = 7;")
     conn.commit()
     conn.close()
 
     engine = create_db_engine(db_file)
     with pytest.raises(UnsupportedDatabaseVersionError) as excinfo:
         init_db(engine)
-    assert "newer than the supported version 5" in str(excinfo.value)
+    assert "newer than the supported version 6" in str(excinfo.value)
 
-    # Verify version remains 6 and table has not been altered/modified
+    # Verify version remains 7 and table has not been altered/modified
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     version = cursor.execute("PRAGMA user_version;").fetchone()[0] or 0
-    assert version == 6
+    assert version == 7
     cursor.execute("PRAGMA table_info(nodes);")
     columns = [col[1] for col in cursor.fetchall()]
     assert len(columns) == 1
@@ -444,29 +459,29 @@ def test_node_service_validation(session):
 
 
 def test_unsupported_version_no_table_creation(tmp_path):
-    """Verify that a database with version > 5 is rejected early.
+    """Verify that a database with version > 6 is rejected early.
 
     Even when there is no nodes table present.
     """
     db_file = tmp_path / "newer_version_no_table.db"
 
-    # Create empty db with version 6
+    # Create empty db with version 7
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
-    cursor.execute("PRAGMA user_version = 6;")
+    cursor.execute("PRAGMA user_version = 7;")
     conn.commit()
     conn.close()
 
     engine = create_db_engine(db_file)
     with pytest.raises(UnsupportedDatabaseVersionError) as excinfo:
         init_db(engine)
-    assert "newer than the supported version 5" in str(excinfo.value)
+    assert "newer than the supported version 6" in str(excinfo.value)
 
-    # Verify version remains 6 and nodes table was NOT created
+    # Verify version remains 7 and nodes table was NOT created
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
     version = cursor.execute("PRAGMA user_version;").fetchone()[0] or 0
-    assert version == 6
+    assert version == 7
 
     cursor.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='nodes';"
