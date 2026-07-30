@@ -540,3 +540,59 @@ def test_service_managed_group_lookups_scoped_by_workspace(
     assert sub1.id != sub2.id
     assert sub1.parent_id == sg1.id
     assert sub2.parent_id == sg2.id
+
+
+def test_resolve_workspace_context_all_kinds(
+    node_service: NodeService, ref_service: ResourceReferenceService
+) -> None:
+    """Verify resolve_workspace_context correctly resolves for all kinds."""
+    # 1. Workspace
+    ws = node_service.create_node(
+        name="Blender WS", node_kind="workspace", auto_layout=True
+    )
+    assert node_service.resolve_workspace_context(ws.id) == ws.id
+
+    # 2. System and Custom
+    sys_group = node_service.get_system_group(ws.id)
+    cust_group = node_service.get_custom_group(ws.id)
+    assert node_service.resolve_workspace_context(sys_group.id) == ws.id
+    assert node_service.resolve_workspace_context(cust_group.id) == ws.id
+
+    # 3. Managed System subsection
+    sub = node_service.get_system_subsection(ws.id, "directory")
+    assert node_service.resolve_workspace_context(sub.id) == ws.id
+
+    # 4. Nested Custom Folder
+    folder = node_service.create_node(
+        name="nested", node_kind="folder", parent_id=cust_group.id
+    )
+    assert node_service.resolve_workspace_context(folder.id) == ws.id
+
+    # 5. Directory
+    dir_node = node_service.create_node(
+        name="Dir",
+        node_kind="resource",
+        resource_type="directory",
+        parent_id=ws.id,
+        auto_route=True,
+    )
+    assert node_service.resolve_workspace_context(dir_node.id) == ws.id
+
+    # 6. File
+    from pathlib import Path
+
+    p = Path("/tmp/f.txt")
+    p.touch()
+    file_node = node_service.create_node(
+        name="File",
+        node_kind="resource",
+        resource_type="file",
+        path="/tmp/f.txt",
+        parent_id=ws.id,
+        auto_route=True,
+    )
+    assert node_service.resolve_workspace_context(file_node.id) == ws.id
+
+    # 7. Reference
+    ref = ref_service.create_reference(file_node.id, cust_group.id)
+    assert node_service.resolve_workspace_context(ref.reference_node_id) == ws.id

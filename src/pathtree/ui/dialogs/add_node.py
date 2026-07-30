@@ -129,19 +129,35 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
     def __init__(
         self,
         node_service: NodeService,
+        workspace_id: uuid.UUID | None = None,
         default_parent_id: uuid.UUID | None = None,
+        context_node_id: uuid.UUID | None = None,
     ) -> None:
         super().__init__()
         self.node_service = node_service
         self.default_parent_id = default_parent_id
+        self.context_node_id = (
+            context_node_id if context_node_id is not None else default_parent_id
+        )
         # We start with workspace selected by default
         self.selected_type = "workspace"
 
-        self.workspace_id = None
-        if default_parent_id is not None:
-            ws_node = self.node_service._find_workspace_for_node(default_parent_id)
-            if ws_node:
-                self.workspace_id = ws_node.id
+        self.workspace_id = workspace_id
+        if self.workspace_id is None and default_parent_id is not None:
+            self.workspace_id = self.node_service.resolve_workspace_context(
+                default_parent_id
+            )
+        if self.workspace_id is None:
+            try:
+                workspaces = [
+                    n
+                    for n in self.node_service.repository.list_all()
+                    if n.node_kind == "workspace"
+                ]
+                if workspaces:
+                    self.workspace_id = workspaces[0].id
+            except Exception:
+                pass
 
     def compose(self) -> ComposeResult:
         parent_choices = self.node_service.get_valid_parent_choices(
@@ -199,6 +215,10 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     id="input-icon",
                     node_kind="workspace",
                 )
+
+            with Vertical(classes="field-container", id="destination-field-container"):
+                yield Label("Destination", classes="field-label")
+                yield Label("Resolved Destination Path", id="label-destination")
 
             with Vertical(classes="field-container", id="parent-field-container"):
                 yield Label("Parent", classes="field-label")
@@ -282,21 +302,23 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         temp_checkbox = self.query_one("#checkbox-temporary", Checkbox)
         parent_container = self.query_one("#parent-field-container", Vertical)
         select_parent = self.query_one("#select-parent", Select)
+        dest_container = self.query_one("#destination-field-container", Vertical)
+        dest_label = self.query_one("#label-destination", Label)
         warning_area = self.query_one("#warning-area", Static)
 
         create_btn = self.query_one("#btn-create", Button)
+
+        has_no_workspace = self.workspace_id is None
 
         if self.selected_type == "workspace":
             path_container.display = False
             temp_checkbox.display = False
             parent_container.display = False
+            dest_container.display = False
             select_parent.disabled = True
             warning_area.update("")
             create_btn.disabled = False
             return
-
-        # Check that we have a valid destination workspace context
-        has_no_workspace = self.workspace_id is None
 
         # Folder, Directory, File, Script, Executable, or URL:
         path_container.display = self.selected_type in (
@@ -306,6 +328,18 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             "executable",
             "url",
         )
+
+        # Check that we have a valid destination workspace context
+        if has_no_workspace:
+            parent_container.display = False
+            dest_container.display = False
+            select_parent.disabled = True
+            create_btn.disabled = True
+            warning_area.update(
+                f"A valid Workspace is required to create a "
+                f"{self.selected_type.capitalize()}. Please create a Workspace first."
+            )
+            return
         temp_checkbox.display = self.selected_type in (
             "directory",
             "file",
@@ -313,18 +347,6 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             "executable",
             "url",
         )
-
-        # Show parent picker for folders/resources if they have selectable options
-        parent_container.display = True
-        select_parent.disabled = has_no_workspace
-
-        if has_no_workspace:
-            create_btn.disabled = True
-            warning_area.update(
-                f"A valid Workspace is required to create a "
-                f"{self.selected_type.capitalize()}. Please create a Workspace first."
-            )
-            return
 
         path_label = self.query_one("#label-path", Label)
         path_input = self.query_one("#input-path", Input)
@@ -335,6 +357,13 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             path_label.update("Path")
             path_input.placeholder = "Enter path (optional)..."
 
+        # Resolve destination path text dynamically
+        ws_node = self.node_service.get_node(self.workspace_id)
+        ws_name = ws_node.name if ws_node else "Workspace"
+
+        # Check if the workspace has a Custom group layout
+        has_custom_layout = self.node_service._has_custom_group(self.workspace_id)
+
         # Retrieve context-aware parent choices from node service
         valid_choices = self.node_service.get_valid_parent_choices(
             self.selected_type,
@@ -342,6 +371,62 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             current_parent_id=self.default_parent_id,
             workspace_id=self.workspace_id,
         )
+
+        # For folders/resources:
+        # Hide parent dropdown and show read-only destination when using new layout!
+        # For legacy layouts, keep parent picker visible/enabled for 100% test compatibility.
+        if has_custom_layout:
+            parent_container.display = False
+            select_parent.disabled = True
+            dest_container.display = True
+
+            if self.selected_type == "folder":
+                # Folder parent resolution (Rule 4):
+                folder_parent_id = None
+                if self.context_node_id is not None:
+                    ctx_node = self.node_service.get_node(self.context_node_id)
+                    if ctx_node:
+                        if ctx_node.node_kind == "folder":
+                            if not self.node_service._is_inside_system_area(
+                                ctx_node.id
+                            ):
+                                folder_parent_id = ctx_node.id
+                        elif (
+                            ctx_node.node_kind == "system_group"
+                            and ctx_node.system_role == "custom"
+                        ):
+                            folder_parent_id = ctx_node.id
+
+                if folder_parent_id is None:
+                    folder_parent_id = self.node_service.get_custom_group(
+                        self.workspace_id
+                    ).id
+
+                parent_node = self.node_service.get_node(folder_parent_id)
+                if parent_node and parent_node.node_kind == "folder":
+                    trail = []
+                    curr = parent_node
+                    while curr is not None and curr.node_kind != "workspace":
+                        trail.insert(0, curr.name)
+                        curr = self.node_service.get_node(curr.parent_id)
+                    dest_text = f"{ws_name} / " + " / ".join(trail)
+                else:
+                    dest_text = f"{ws_name} / Custom"
+            else:
+                role_label = self.selected_type.capitalize() + "s"
+                if self.selected_type == "directory":
+                    role_label = "Directories"
+                elif self.selected_type == "launch_profile":
+                    role_label = "Launch Profiles"
+                elif self.selected_type == "multi_launcher":
+                    role_label = "Multi Launchers"
+                dest_text = f"{ws_name} / System / {role_label}"
+
+            dest_label.update(dest_text)
+        else:
+            parent_container.display = True
+            select_parent.disabled = False
+            dest_container.display = False
 
         if not valid_choices:
             select_parent.disabled = True
@@ -406,6 +491,12 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         auto_layout = False
         auto_route = False
 
+        # Verify Custom/System layout exists
+        has_custom_layout = (
+            self.workspace_id is not None
+            and self.node_service._has_custom_group(self.workspace_id)
+        )
+
         if self.selected_type == "workspace":
             node_kind = "workspace"
             resource_type = None
@@ -420,25 +511,40 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             is_temporary = False
             auto_route = True
 
-            parent_val = self.query_one("#select-parent", Select).value
-            parent_id = resolve_optional_uuid(parent_val)
-            if parent_id is None and self.workspace_id is not None:
-                if self.node_service._has_custom_group(self.workspace_id):
+            if has_custom_layout:
+                # Folder parent resolution (Rule 4):
+                parent_id = None
+                if self.context_node_id is not None:
+                    ctx_node = self.node_service.get_node(self.context_node_id)
+                    if ctx_node:
+                        if ctx_node.node_kind == "folder":
+                            if not self.node_service._is_inside_system_area(
+                                ctx_node.id
+                            ):
+                                parent_id = ctx_node.id
+                        elif (
+                            ctx_node.node_kind == "system_group"
+                            and ctx_node.system_role == "custom"
+                        ):
+                            parent_id = ctx_node.id
+
+                if parent_id is None:
                     parent_id = self.node_service.get_custom_group(self.workspace_id).id
-                else:
+            else:
+                parent_val = self.query_one("#select-parent", Select).value
+                parent_id = resolve_optional_uuid(parent_val)
+                if parent_id is None:
                     parent_id = self.workspace_id
         else:  # directory, file, script, executable, url, or multi_launcher
             auto_route = True
             node_kind = "resource"
             resource_type = self.selected_type
 
-            parent_val = self.query_one("#select-parent", Select).value
-            parent_id = resolve_optional_uuid(parent_val)
-            # If the workspace has Custom layout, we force parent_id to be workspace_id for auto-routing!
-            if self.workspace_id is not None and self.node_service._has_custom_group(
-                self.workspace_id
-            ):
-                parent_id = self.workspace_id
+            if has_custom_layout:
+                parent_id = self.workspace_id  # Pass workspace context directly!
+            else:
+                parent_val = self.query_one("#select-parent", Select).value
+                parent_id = resolve_optional_uuid(parent_val)
 
             if resource_type == "multi_launcher":
                 path = None

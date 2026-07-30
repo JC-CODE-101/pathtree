@@ -478,6 +478,19 @@ class NodeService:
             curr = self.repository.get_by_id(curr.parent_id)
         return None
 
+    def resolve_workspace_context(self, node_id: uuid.UUID | None) -> uuid.UUID | None:
+        """Find the Workspace ancestor ID of any given node."""
+        if node_id is None:
+            return None
+        curr = self.repository.get_by_id(node_id)
+        while curr is not None:
+            if curr.node_kind == "workspace":
+                return curr.id
+            if curr.parent_id is None:
+                break
+            curr = self.repository.get_by_id(curr.parent_id)
+        return None
+
     def _is_inside_system_area(self, node_id: uuid.UUID | None) -> bool:
         """Check if a node ID is located inside the System area of any workspace."""
         curr_id = node_id

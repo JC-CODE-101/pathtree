@@ -934,11 +934,13 @@ class MainScreen(Screen[None]):
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
 
-        # Default parent behavior:
-        # No selection -> Root
-        # Workspace -> selected workspace
-        # Folder -> selected folder
-        # Directory resource -> parent of directory resource
+        # autoritative workspace context resolution
+        selected_node_id = tree.cursor_node.data if tree.cursor_node else None
+        current_workspace_id = self.node_service.resolve_workspace_context(
+            selected_node_id
+        )
+
+        # Default parent behavior matching legacy expectations
         default_parent_id = None
         if tree.cursor_node is not None and tree.cursor_node.data is not None:
             node = self.node_service.get_node(tree.cursor_node.data)
@@ -947,6 +949,8 @@ class MainScreen(Screen[None]):
                     default_parent_id = node.id
                 elif node.node_kind == "resource":
                     default_parent_id = node.parent_id
+                else:
+                    default_parent_id = node.id
 
         def handle_add_finished(new_node_id: uuid.UUID | None) -> None:
             if new_node_id is not None:
@@ -966,7 +970,11 @@ class MainScreen(Screen[None]):
             tree.focus()
 
         self.app.push_screen(
-            AddNodeDialog(self.node_service, default_parent_id=default_parent_id),
+            AddNodeDialog(
+                self.node_service,
+                workspace_id=current_workspace_id,
+                default_parent_id=default_parent_id,
+            ),
             callback=handle_add_finished,
         )
 
