@@ -261,7 +261,7 @@ class MainScreen(Screen[None]):
 
         self.call_after_refresh(self._update_details_and_selection)
 
-    def _update_details_and_selection(self) -> None:
+    def _update_details_and_selection(self, force_update: bool = False) -> None:
         """Utility to safely update details panel based on selected tree cursor."""
         tree = self.query_one("#tree-view", NodeTreeView)
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
@@ -279,13 +279,17 @@ class MainScreen(Screen[None]):
         if cursor_node is None or cursor_node.data is None:
             # We are filtered and no matches
             details_panel.update_node(None, empty_message="No matching nodes")
+            self._last_selected_node_id = None
+            return
+
+        # AVOID duplicate updates if selection hasn't actually changed (avoids hover/mouse lag)
+        if not force_update and cursor_node.data == self._last_selected_node_id:
             return
 
         # Load node details
         node = self.node_service.get_node(cursor_node.data)
         details_panel.update_node(node)
-        if tree.has_focus or self._last_selected_node_id is None:
-            self._last_selected_node_id = cursor_node.data
+        self._last_selected_node_id = cursor_node.data
 
         # Keep current state available for persistence
         self._update_persistent_state()
@@ -914,7 +918,9 @@ class MainScreen(Screen[None]):
         if not filtered_nodes and is_now_non_empty:
             tree.move_cursor(None)
 
-        self.call_after_refresh(self._update_details_and_selection)
+        self.call_after_refresh(
+            lambda: self._update_details_and_selection(force_update=True)
+        )
 
     def on_node_tree_view_focus_search(self, event: NodeTreeView.FocusSearch) -> None:
         """Focus SearchInput when '/' or 's' is pressed in the tree."""
