@@ -295,6 +295,9 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             create_btn.disabled = False
             return
 
+        # Check that we have a valid destination workspace context
+        has_no_workspace = self.workspace_id is None
+
         # Folder, Directory, File, Script, Executable, or URL:
         path_container.display = self.selected_type in (
             "directory",
@@ -310,8 +313,18 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             "executable",
             "url",
         )
+
+        # Show parent picker for folders/resources if they have selectable options
         parent_container.display = True
-        select_parent.disabled = False
+        select_parent.disabled = has_no_workspace
+
+        if has_no_workspace:
+            create_btn.disabled = True
+            warning_area.update(
+                f"A valid Workspace is required to create a "
+                f"{self.selected_type.capitalize()}. Please create a Workspace first."
+            )
+            return
 
         path_label = self.query_one("#label-path", Label)
         path_input = self.query_one("#input-path", Input)
@@ -334,8 +347,8 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             select_parent.disabled = True
             create_btn.disabled = True
             warning_area.update(
-                f"No valid parent Workspaces or Folders available to create a "
-                f"{self.selected_type.capitalize()}. Please create a Workspace first."
+                f"No valid parent options available to create a "
+                f"{self.selected_type.capitalize()}."
             )
             return
 
@@ -388,9 +401,6 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         description = self.query_one("#input-description", Input).value or None
         icon = self.query_one(IconPicker).value or None
 
-        parent_val = self.query_one("#select-parent", Select).value
-        parent_id = resolve_optional_uuid(parent_val)
-
         is_favorite = self.query_one("#checkbox-favorite", Checkbox).value
 
         auto_layout = False
@@ -404,21 +414,31 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             parent_id = None  # Always force Workspace to be at root (None)
             auto_layout = True
         elif self.selected_type == "folder":
-            if parent_id is None:
-                status_area.update("A valid parent Workspace or Folder is required.")
-                return
             node_kind = "folder"
             resource_type = None
             path = None
             is_temporary = False
             auto_route = True
+
+            parent_val = self.query_one("#select-parent", Select).value
+            parent_id = resolve_optional_uuid(parent_val)
+            if parent_id is None and self.workspace_id is not None:
+                if self.node_service._has_custom_group(self.workspace_id):
+                    parent_id = self.node_service.get_custom_group(self.workspace_id).id
+                else:
+                    parent_id = self.workspace_id
         else:  # directory, file, script, executable, url, or multi_launcher
             auto_route = True
-            if parent_id is None:
-                status_area.update("A valid parent Workspace or Folder is required.")
-                return
             node_kind = "resource"
             resource_type = self.selected_type
+
+            parent_val = self.query_one("#select-parent", Select).value
+            parent_id = resolve_optional_uuid(parent_val)
+            # If the workspace has Custom layout, we force parent_id to be workspace_id for auto-routing!
+            if self.workspace_id is not None and self.node_service._has_custom_group(
+                self.workspace_id
+            ):
+                parent_id = self.workspace_id
 
             if resource_type == "multi_launcher":
                 path = None

@@ -70,9 +70,11 @@ class MoveNodeDialog(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         workspace_id = None
-        if self.node.node_kind != "workspace":
+        if self.node.node_kind == "folder" or (
+            self.node.node_kind == "resource" and self.node.resource_type == "reference"
+        ):
             ws_node = self.node_service._find_workspace_for_node(self.node_id)
-            if ws_node:
+            if ws_node and self.node_service._has_custom_group(ws_node.id):
                 workspace_id = ws_node.id
 
         parent_choices = self.node_service.get_valid_parent_choices(

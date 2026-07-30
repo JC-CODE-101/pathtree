@@ -744,20 +744,7 @@ class NodeService:
             raise NodeNotFoundError(f"Node {node_id} does not exist.")
 
         if node.node_kind == "system_group":
-            changing_protected = any(
-                k in kwargs
-                for k in (
-                    "name",
-                    "icon",
-                    "sort_order",
-                    "is_favorite",
-                    "is_temporary",
-                    "path",
-                    "description",
-                )
-            )
-            if changing_protected:
-                raise ValidationError("Managed system groups cannot be modified.")
+            raise ValidationError("Managed system groups cannot be modified.")
 
         if "parent_id" in kwargs:
             raise ValidationError(

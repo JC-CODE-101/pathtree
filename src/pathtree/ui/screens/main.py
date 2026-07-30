@@ -981,6 +981,35 @@ class MainScreen(Screen[None]):
         if (
             node is not None
             and node.node_kind == "resource"
+            and node.resource_type == "launch_profile"
+        ):
+            from pathtree.ui.dialogs.edit_profile import EditProfileDialog
+
+            try:
+                profile = self.launch_profile_service.get_profile_for_node(node_id)
+
+                def handle_profile_edit_finished(changed: bool) -> None:
+                    if changed:
+                        self.app.notify("Launch Profile updated.")
+                        self.refresh_tree(selected_node_id=node_id)
+                    tree.focus()
+
+                self.app.push_screen(
+                    EditProfileDialog(
+                        self.node_service,
+                        self.launch_profile_service,
+                        profile_id=profile.id,
+                    ),
+                    callback=handle_profile_edit_finished,
+                )
+            except Exception as e:
+                details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+                details_panel.update_error(str(e))
+            return
+
+        elif (
+            node is not None
+            and node.node_kind == "resource"
             and node.resource_type == "multi_launcher"
         ):
             from pathtree.ui.dialogs.edit_multi_launcher import (

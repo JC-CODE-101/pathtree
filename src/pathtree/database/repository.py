@@ -193,6 +193,7 @@ class NodeRepository:
                 self.session.delete(node)
                 self.session.flush()
             self.session.commit()
+            self.session.expire_all()
             return len(descendants)
         except IntegrityError as e:
             self.session.rollback()
