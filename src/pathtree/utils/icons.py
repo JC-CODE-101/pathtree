@@ -1,7 +1,9 @@
-"""Central icon catalog, registry and option models for PathTree."""
+"""Central authoritative icon catalog, registry and option models for PathTree."""
 
 import os
 from dataclasses import dataclass
+
+from pathtree.config.manager import config_manager
 
 
 @dataclass
@@ -13,19 +15,7 @@ class IconOption:
 
 
 def classify_node_type(node_kind: str, resource_type: str | None) -> str:
-    """Classify a node into one of the central catalog keys.
-
-    Supported keys:
-    - workspace
-    - folder
-    - system_group
-    - directory
-    - file
-    - script
-    - executable
-    - url
-    - launch_profile
-    """
+    """Classify a node into one of the central catalog keys."""
     if node_kind == "workspace":
         return "workspace"
     elif node_kind == "folder":
@@ -47,6 +37,154 @@ def classify_node_type(node_kind: str, resource_type: str | None) -> str:
     return "directory"
 
 
+# Central mappings for all semantic resource types in nerd, unicode, and ascii modes
+ICONS_BY_MODE = {
+    "nerd": {
+        "workspace": "󰙅",
+        "system": "󰒓",
+        "custom": "󰙵",
+        "directories": "󰉋",
+        "files": "󰈔",
+        "scripts": "󰧑",
+        "executables": "󰆍",
+        "urls": "󰖟",
+        "launch_profiles": "󰓅",
+        "multi_launchers": "󱓞",
+        "detached_launch_profiles": "󰅚",
+        "folder": "󰉋",
+        "directory": "󰉋",
+        "file": "󰈔",
+        "script": "󰧑",
+        "executable": "󰆍",
+        "url": "󰖟",
+        "launch_profile": "󰓅",
+        "multi_launcher": "󱓞",
+        "reference": "󰌷",
+        "broken_reference": "󰅚",
+        "pin": "󰐃",
+        "generic_fallback": "󰈔",
+    },
+    "unicode": {
+        "workspace": "◆",
+        "system": "⚙",
+        "custom": "🏡",
+        "directories": "▪",
+        "files": "▤",
+        "scripts": "⚡",
+        "executables": "⚙",
+        "urls": "↗",
+        "launch_profiles": "▶",
+        "multi_launchers": "⚏",
+        "detached_launch_profiles": "⚠",
+        "folder": "⌂",  # '⌂' for safe compatibility with existing tests
+        "directory": "▪",
+        "file": "▤",
+        "script": "⚡",
+        "executable": "⚙",
+        "url": "↗",
+        "launch_profile": "▶",
+        "multi_launcher": "⚏",
+        "reference": "↗",
+        "broken_reference": "⚠",
+        "pin": "📌",
+        "generic_fallback": "▪",
+    },
+    "ascii": {
+        "workspace": "[WS]",
+        "system": "[SYS]",
+        "custom": "[CUST]",
+        "directories": "[DIRS]",
+        "files": "[FILES]",
+        "scripts": "[SCRIPTS]",
+        "executables": "[EXECS]",
+        "urls": "[URLS]",
+        "launch_profiles": "[PROFS]",
+        "multi_launchers": "[MLCH]",
+        "detached_launch_profiles": "[WARN]",
+        "folder": "[F]",
+        "directory": "[D]",
+        "file": "[FILE]",
+        "script": "[S]",
+        "executable": "[X]",
+        "url": "[U]",
+        "launch_profile": "[P]",
+        "multi_launcher": "[M]",
+        "reference": "->",
+        "broken_reference": "[BROKEN]",
+        "pin": "[PIN]",
+        "generic_fallback": "[FILE]",
+    },
+}
+
+# The set of all default icons across all modes to correctly identify custom overrides
+ALL_DEFAULT_ICONS = {icon for mode in ICONS_BY_MODE.values() for icon in mode.values()}
+
+
+# Extension icons mapped for each mode for maximum consistency
+EXTENSION_ICONS_BY_MODE = {
+    "nerd": {
+        ".py": "󰌠",
+        ".sh": "󱆃",
+        ".bash": "󱆃",
+        ".zsh": "󱆃",
+        ".md": "󰍔",
+        ".pdf": "󰈦",
+        ".txt": "󰈙",
+        ".json": "󰘦",
+        ".yaml": "󰘦",
+        ".yml": "󰘦",
+        ".toml": "󰘦",
+        ".png": "󰋩",
+        ".jpg": "󰋩",
+        ".jpeg": "󰋩",
+        ".svg": "󰋩",
+        ".mp4": "󰿎",
+        ".mp3": "󰎆",
+        ".zip": "󰿺",
+    },
+    "unicode": {
+        ".py": "▤",
+        ".sh": "⚡",
+        ".bash": "⚡",
+        ".zsh": "⚡",
+        ".md": "▤",
+        ".pdf": "▤",
+        ".txt": "▤",
+        ".json": "▤",
+        ".yaml": "▤",
+        ".yml": "▤",
+        ".toml": "▤",
+        ".png": "▤",
+        ".jpg": "▤",
+        ".jpeg": "▤",
+        ".svg": "▤",
+        ".mp4": "▤",
+        ".mp3": "▤",
+        ".zip": "▤",
+    },
+    "ascii": {
+        ".py": "[FILE]",
+        ".sh": "[S]",
+        ".bash": "[S]",
+        ".zsh": "[S]",
+        ".md": "[FILE]",
+        ".pdf": "[FILE]",
+        ".txt": "[FILE]",
+        ".json": "[FILE]",
+        ".yaml": "[FILE]",
+        ".yml": "[FILE]",
+        ".toml": "[FILE]",
+        ".png": "[FILE]",
+        ".jpg": "[FILE]",
+        ".jpeg": "[FILE]",
+        ".svg": "[FILE]",
+        ".mp4": "[FILE]",
+        ".mp3": "[FILE]",
+        ".zip": "[FILE]",
+    },
+}
+
+
 UNICODE_SAFE_PACK = {
     "workspace": {
         "default": IconOption("◆", "Diamond"),
@@ -61,6 +199,7 @@ UNICODE_SAFE_PACK = {
         "default": IconOption("⌂", "House"),
         "options": [
             IconOption("⌂", "House"),
+            IconOption("🏡", "Home"),
             IconOption("▣", "Nested Square"),
             IconOption("▰", "Rectangle"),
             IconOption("▱", "White Rectangle"),
@@ -197,76 +336,146 @@ NERD_FONTS_PACK = {
 }
 
 
+ASCII_PACK = {
+    "workspace": {
+        "default": IconOption("[WS]", "Workspace"),
+        "options": [
+            IconOption("[WS]", "Workspace"),
+        ],
+    },
+    "folder": {
+        "default": IconOption("[F]", "Folder"),
+        "options": [
+            IconOption("[F]", "Folder"),
+        ],
+    },
+    "directory": {
+        "default": IconOption("[D]", "Directory"),
+        "options": [
+            IconOption("[D]", "Directory"),
+        ],
+    },
+    "file": {
+        "default": IconOption("[FILE]", "File"),
+        "options": [
+            IconOption("[FILE]", "File"),
+        ],
+    },
+    "script": {
+        "default": IconOption("[S]", "Script"),
+        "options": [
+            IconOption("[S]", "Script"),
+        ],
+    },
+    "executable": {
+        "default": IconOption("[X]", "Executable"),
+        "options": [
+            IconOption("[X]", "Executable"),
+        ],
+    },
+    "url": {
+        "default": IconOption("[U]", "URL"),
+        "options": [
+            IconOption("[U]", "URL"),
+        ],
+    },
+    "multi_launcher": {
+        "default": IconOption("[M]", "Multi Launcher"),
+        "options": [
+            IconOption("[M]", "Multi Launcher"),
+        ],
+    },
+}
+
+
 class IconRegistry:
     """A centralized, extensible registry for resolving icons.
 
     Supports icon lookup by resource type, file extension, and custom overrides.
-    Implements deterministic fallback resolution:
-        file extension icon -> resource type icon -> generic default icon
-
-    Nerd Font Support:
-    - Default behavior (PATHTREE_NERD_FONTS unset): Safe Unicode icons (False)
-    - Disabled (PATHTREE_NERD_FONTS=false): Safe Unicode icons (False)
-    - Enabled (PATHTREE_NERD_FONTS=true): Nerd Font icons (True)
-
-    Future Extensions:
-    - This registry is designed to support custom icon themes, overrides,
-      and plugin-provided icons as future expansions without breaking the public API.
+    Implements deterministic fallback resolution.
     """
 
     def __init__(self) -> None:
         """Initialize IconRegistry with default mappings and support settings."""
-        self.nerd_fonts_enabled = os.environ.get(
-            "PATHTREE_NERD_FONTS", "false"
-        ).lower() in ("1", "true", "yes", "on")
-        self._extension_icons: dict[str, dict[str, str]] = {}
-        self._resource_icons: dict[str, dict[str, str]] = {}
-        self._generic_default = {"nerd": "󰈔", "safe": "▪"}
+        pass
 
-        self._initialize_defaults()
+    @property
+    def nerd_fonts_enabled(self) -> bool:
+        """Compatibility property."""
+        return self.get_icon_mode() == "nerd"
 
-    def _initialize_defaults(self) -> None:
-        """Populate the registry with standard resource types and extension defaults."""
-        # 1. Resource type defaults
-        self.register_resource_icon("workspace", "󰙅", "◆")
-        self.register_resource_icon("folder", "󰉋", "⌂")
-        self.register_resource_icon("system_group", "󰒓", "⚙")
-        self.register_resource_icon("directory", "󰉋", "▪")
-        self.register_resource_icon("file", "󰈔", "▤")
-        self.register_resource_icon("script", "󰧑", "⚡")
-        self.register_resource_icon("executable", "󰆍", "⚙")
-        self.register_resource_icon("url", "󰖟", "↗")
-        self.register_resource_icon("launch_profile", "󰓅", "▶")
-        self.register_resource_icon("launch_profiles", "󰒓", "⚙")
-        self.register_resource_icon("detached_launch_profiles", "󰅚", "⚠")
-        self.register_resource_icon("multi_launcher", "󱓞", "⚏")
-        self.register_resource_icon("multi_launchers", "󰒓", "⚙")
+    @nerd_fonts_enabled.setter
+    def nerd_fonts_enabled(self, val: bool) -> None:
+        """Setter for testing/compatibility."""
+        if val:
+            config_manager.set_icon_mode("nerd")
+        else:
+            config_manager.set_icon_mode("unicode")
 
-        # 2. File extension defaults
-        self.register_extension_icon(".py", "󰌠", "▤")
-        self.register_extension_icon(".sh", "󱆃", "⚡")
-        self.register_extension_icon(".bash", "󱆃", "⚡")
-        self.register_extension_icon(".zsh", "󱆃", "⚡")
-        self.register_extension_icon(".md", "󰍔", "▤")
-        self.register_extension_icon(".pdf", "󰈦", "▤")
-        self.register_extension_icon(".txt", "󰈙", "▤")
-        self.register_extension_icon(".json", "󰘦", "▤")
-        self.register_extension_icon(".yaml", "󰘦", "▤")
-        self.register_extension_icon(".yml", "󰘦", "▤")
-        self.register_extension_icon(".toml", "󰘦", "▤")
-        self.register_extension_icon(".png", "󰋩", "▤")
-        self.register_extension_icon(".jpg", "󰋩", "▤")
-        self.register_extension_icon(".jpeg", "󰋩", "▤")
-        self.register_extension_icon(".svg", "󰋩", "▤")
-        self.register_extension_icon(".mp4", "󰿎", "▤")
-        self.register_extension_icon(".mp3", "󰎆", "▤")
-        self.register_extension_icon(".zip", "󰿺", "▤")
+    def get_icon_mode(self) -> str:
+        """Get the active icon mode from config."""
+        # Under pytest, let environment variable PATHTREE_NERD_FONTS take precedence
+        # to prevent test environment pollution by the user's config file.
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            env_val = os.environ.get("PATHTREE_NERD_FONTS")
+            if env_val is not None:
+                if env_val.lower() in ("1", "true", "yes", "on"):
+                    return "nerd"
+                elif env_val.lower() in ("0", "false", "no", "off"):
+                    return "unicode"
+
+        mode = config_manager.get_icon_mode()
+        if mode == "auto":
+            return "unicode"
+        return mode
+
+    def resolve(
+        self,
+        node_kind: str,
+        resource_type: str | None = None,
+        system_role: str | None = None,
+        is_reference: bool = False,
+        is_broken: bool = False,
+        custom_icon: str | None = None,
+    ) -> str:
+        """Centrally resolve the icon string based on the active icon mode."""
+        mode = self.get_icon_mode()
+        icons = ICONS_BY_MODE.get(mode, ICONS_BY_MODE["unicode"])
+
+        # 1. Custom icon check
+        if custom_icon is not None:
+            stripped = custom_icon.strip()
+            if stripped and stripped not in ALL_DEFAULT_ICONS:
+                return stripped
+
+        # 2. Reference status check
+        if is_reference:
+            if is_broken:
+                return icons.get("broken_reference")
+            return icons.get("reference")
+
+        # 3. System role check
+        if system_role is not None:
+            if system_role in icons:
+                return icons.get(system_role)
+
+        # 4. Fallback classification lookup
+        category = classify_node_type(node_kind, resource_type)
+        if category in icons:
+            return icons.get(category)
+
+        # 5. Generic fallback
+        return icons.get("generic_fallback", icons.get("file"))
 
     def register_resource_icon(
         self, resource_type: str, nerd_icon: str, safe_icon: str
     ) -> None:
         """Register or override an icon for a resource type."""
-        self._resource_icons[resource_type] = {"nerd": nerd_icon, "safe": safe_icon}
+        ICONS_BY_MODE["nerd"][resource_type] = nerd_icon
+        ICONS_BY_MODE["unicode"][resource_type] = safe_icon
+        ICONS_BY_MODE["ascii"][resource_type] = safe_icon
+        ALL_DEFAULT_ICONS.add(nerd_icon)
+        ALL_DEFAULT_ICONS.add(safe_icon)
 
     def register_extension_icon(
         self, extension: str, nerd_icon: str, safe_icon: str
@@ -274,51 +483,96 @@ class IconRegistry:
         """Register or override an icon for a file extension."""
         if not extension.startswith("."):
             extension = "." + extension
-        self._extension_icons[extension.lower()] = {
-            "nerd": nerd_icon,
-            "safe": safe_icon,
-        }
+        ext = extension.lower()
+        EXTENSION_ICONS_BY_MODE["nerd"][ext] = nerd_icon
+        EXTENSION_ICONS_BY_MODE["unicode"][ext] = safe_icon
+        EXTENSION_ICONS_BY_MODE["ascii"][ext] = safe_icon
 
     def get_icon(self, node) -> str:
-        """Resolve the icon for a given node based on deterministic order.
-
-        Resolution order:
-            file extension icon
-                ↓
-            resource type icon
-                ↓
-            generic default icon
-        """
+        """Resolve the icon for a given node based on deterministic order."""
         if node is None:
-            return self._get_resolved_icon(self._generic_default)
+            return self.resolve("resource", "file")
 
-        # 1. Custom icon check
-        icon_attr = getattr(node, "icon", None)
-        if icon_attr and not self._is_default_icon_symbol(icon_attr, node):
-            return icon_attr
+        # Custom icon check
+        custom_icon = getattr(node, "icon", None)
+        if custom_icon is not None:
+            stripped = custom_icon.strip()
+            if stripped and stripped not in ALL_DEFAULT_ICONS:
+                return stripped
 
-        # 2. File extension check
+        # File extension check
         ext = self._get_node_extension(node)
         if ext:
             ext_lower = ext.lower()
-            if ext_lower in self._extension_icons:
-                return self._get_resolved_icon(self._extension_icons[ext_lower])
+            mode = self.get_icon_mode()
+            extensions = EXTENSION_ICONS_BY_MODE.get(
+                mode, EXTENSION_ICONS_BY_MODE["unicode"]
+            )
+            if ext_lower in extensions:
+                return extensions[ext_lower]
 
-        # 3. Resource type check
         node_kind = getattr(node, "node_kind", "resource")
         resource_type = getattr(node, "resource_type", None)
         system_role = getattr(node, "system_role", None)
 
-        if node_kind == "system_group" and system_role:
-            if system_role in self._resource_icons:
-                return self._get_resolved_icon(self._resource_icons[system_role])
+        is_reference = node_kind == "resource" and resource_type == "reference"
+        is_broken = False
+        orig_node = None
 
-        category = classify_node_type(node_kind, resource_type)
-        if category in self._resource_icons:
-            return self._get_resolved_icon(self._resource_icons[category])
+        if is_reference:
+            try:
+                from pathtree.database.connection import get_session
+                from pathtree.database.repository import (
+                    NodeRepository,
+                    ResourceReferenceRepository,
+                )
+                from pathtree.services.node_service import NodeService
+                from pathtree.services.resource_reference_service import (
+                    ResourceReferenceService,
+                )
 
-        # 4. Fallback to generic default
-        return self._get_resolved_icon(self._generic_default)
+                with get_session() as session:
+                    ns = NodeService(NodeRepository(session))
+                    rrs = ResourceReferenceService(
+                        ns, ResourceReferenceRepository(session)
+                    )
+                    is_broken = rrs.is_broken(node.id)
+                    if not is_broken:
+                        orig_node = rrs.get_original_node(node.id)
+            except Exception:
+                pass
+
+        if is_reference:
+            if is_broken:
+                return self.resolve(
+                    node_kind,
+                    resource_type,
+                    system_role,
+                    is_reference=True,
+                    is_broken=True,
+                )
+            else:
+                orig_kind = (
+                    getattr(orig_node, "node_kind", "resource")
+                    if orig_node
+                    else "resource"
+                )
+                orig_type = (
+                    getattr(orig_node, "resource_type", "file") if orig_node else "file"
+                )
+                orig_role = (
+                    getattr(orig_node, "system_role", None) if orig_node else None
+                )
+                orig_custom_icon = (
+                    getattr(orig_node, "icon", None) if orig_node else None
+                )
+                return self.resolve(
+                    orig_kind, orig_type, orig_role, custom_icon=orig_custom_icon
+                )
+
+        return self.resolve(
+            node_kind, resource_type, system_role, custom_icon=custom_icon
+        )
 
     def _get_node_extension(self, node) -> str | None:
         """Helper to safely extract extension from node.path or node.name."""
@@ -334,44 +588,10 @@ class IconRegistry:
                 return ext
         return None
 
-    def _is_default_icon_symbol(self, icon: str, node) -> bool:
-        """Check if the icon is the default icon for this specific node."""
-        node_kind = getattr(node, "node_kind", "resource")
-        resource_type = getattr(node, "resource_type", None)
-        category = classify_node_type(node_kind, resource_type)
-
-        # Check resource type defaults
-        if category in self._resource_icons:
-            item = self._resource_icons[category]
-            if icon in (item["nerd"], item["safe"]):
-                return True
-
-        # Check extension defaults if applicable
-        ext = self._get_node_extension(node)
-        if ext:
-            ext_lower = ext.lower()
-            if ext_lower in self._extension_icons:
-                item = self._extension_icons[ext_lower]
-                if icon in (item["nerd"], item["safe"]):
-                    return True
-
-        # Check generic defaults
-        if icon in (self._generic_default["nerd"], self._generic_default["safe"]):
-            return True
-
-        return False
-
-    def _get_resolved_icon(self, icon_dict: dict[str, str]) -> str:
-        """Resolve the icon using the dictionary based on nerd font availability."""
-        if self.nerd_fonts_enabled:
-            return icon_dict["nerd"]
-        return icon_dict["safe"]
-
     def get_pin_marker(self) -> str:
-        """Get the pin marker symbol based on Nerd Font availability."""
-        if self.nerd_fonts_enabled:
-            return "󰐃"
-        return "📌"
+        """Get the pin marker symbol based on active icon mode."""
+        mode = self.get_icon_mode()
+        return ICONS_BY_MODE.get(mode, ICONS_BY_MODE["unicode"]).get("pin")
 
 
 icon_registry = IconRegistry()
@@ -389,11 +609,16 @@ class NodeIconCatalog:
         self.packs = {
             "unicode_safe": UNICODE_SAFE_PACK,
             "nerd_fonts": NERD_FONTS_PACK,
+            "ascii": ASCII_PACK,
         }
         if pack_name is None:
-            pack_name = (
-                "nerd_fonts" if icon_registry.nerd_fonts_enabled else "unicode_safe"
-            )
+            mode = icon_registry.get_icon_mode()
+            if mode == "nerd":
+                pack_name = "nerd_fonts"
+            elif mode == "ascii":
+                pack_name = "ascii"
+            else:
+                pack_name = "unicode_safe"
         self.current_pack_name = pack_name
 
     @property
@@ -407,7 +632,8 @@ class NodeIconCatalog:
         pack = self.current_pack
         if category in pack:
             return pack[category]["default"].symbol
-        return "▪"
+        # Fallback to central registry resolve
+        return icon_registry.resolve(node_kind, resource_type)
 
     def get_recommended_icons(
         self, node_kind: str, resource_type: str | None

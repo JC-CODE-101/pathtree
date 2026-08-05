@@ -19,16 +19,12 @@ from pathtree.services.node_service import NodeService, NodeServiceError, TreeNo
 
 
 class IconText(Text):
-    """Custom Rich Text subclass displaying icon before name."""
+    """Custom Rich Text subclass displaying semantically styled icon and name."""
 
     def __init__(self, name: str, icon: str | None = None, *args, **kwargs) -> None:
-        """Initialize IconText with name and optional icon."""
         self.name = name
         self.icon = icon
-        if icon:
-            super().__init__(f"{icon} {name}", *args, **kwargs)
-        else:
-            super().__init__(name, *args, **kwargs)
+        super().__init__(*args, **kwargs)
 
     def split(self, *args, **kwargs) -> list["IconText"]:
         """Overridden to prevent split from downgrading back to standard Text."""
@@ -37,6 +33,153 @@ class IconText(Text):
     def __str__(self) -> str:
         """Return the clean node name without its prepended icon."""
         return self.name
+
+
+def build_node_label(node, context) -> IconText:
+    """Build a rich, semantically styled tree node label."""
+    # Extract context variables
+    pinned = context.get("pinned", False)
+    is_reference = context.get("is_reference", False)
+    is_broken = context.get("is_broken", False)
+    orig_node = context.get("orig_node", None)
+
+    node_kind = getattr(node, "node_kind", "resource")
+    resource_type = getattr(node, "resource_type", None)
+    system_role = getattr(node, "system_role", None)
+    custom_icon = getattr(node, "icon", None)
+
+    from pathtree.utils.icons import icon_registry
+
+    icon = ""
+    if is_reference:
+        if is_broken:
+            icon = icon_registry.resolve(
+                node_kind, resource_type, system_role, is_reference=True, is_broken=True
+            )
+        else:
+            orig_kind = (
+                getattr(orig_node, "node_kind", "resource") if orig_node else "resource"
+            )
+            orig_type = (
+                getattr(orig_node, "resource_type", "file") if orig_node else "file"
+            )
+            orig_role = getattr(orig_node, "system_role", None) if orig_node else None
+            orig_custom_icon = getattr(orig_node, "icon", None) if orig_node else None
+            icon = icon_registry.resolve(
+                orig_kind, orig_type, orig_role, custom_icon=orig_custom_icon
+            )
+    else:
+        icon = icon_registry.resolve(
+            node_kind, resource_type, system_role, custom_icon=custom_icon
+        )
+
+    pin_icon = icon
+    if pinned:
+        pin_icon = f"{icon_registry.get_pin_marker()} {icon}"
+
+    label = IconText(node.name, icon=pin_icon)
+
+    # Determine the icon and text colors/styles
+    icon_style = ""
+    name_style = ""
+
+    # Resolve workspace accent if applicable
+    workspace_accent = "default"
+    if node_kind == "workspace":
+        workspace_accent = getattr(node, "accent_color", "default") or "default"
+
+    if node_kind == "workspace":
+        accent_color_map = {
+            "default": "bold #ffffff",
+            "red": "bold #ff5555",
+            "orange": "bold #ffaa00",
+            "yellow": "bold #ffff55",
+            "green": "bold #55ff55",
+            "cyan": "bold #55ffff",
+            "blue": "bold #5555ff",
+            "purple": "bold #aa55ff",
+            "magenta": "bold #ff55ff",
+        }
+        icon_style = accent_color_map.get(workspace_accent, "bold #ffffff")
+        name_style = icon_style
+    elif node_kind == "system_group":
+        if system_role == "system":
+            icon_style = "bold #6688cc"
+            name_style = "bold #6688cc"
+        elif system_role == "custom":
+            icon_style = "bold #33cccc"
+            name_style = "bold #33cccc"
+        else:
+            role_colors = {
+                "directories": "bold #0088ff",
+                "files": "bold #a0a0a0",
+                "scripts": "bold #ffaa00",
+                "executables": "bold #00ff00",
+                "urls": "bold #00ffff",
+                "launch_profiles": "bold #ffaa00",
+                "multi_launchers": "bold #aa55ff",
+            }
+            icon_style = role_colors.get(system_role, "bold #a0a0a0")
+            name_style = "dim"
+    elif node_kind == "resource":
+        if is_reference:
+            if is_broken:
+                icon_style = "bold #ff5555"
+                name_style = "bold #ff5555 italic"
+            else:
+                orig_type = (
+                    getattr(orig_node, "resource_type", "file") if orig_node else "file"
+                )
+                orig_colors = {
+                    "directory": "bold #0088ff",
+                    "file": "bold #a0a0a0",
+                    "script": "bold #ffaa00",
+                    "executable": "bold #00ff00",
+                    "url": "bold #00ffff",
+                    "launch_profile": "bold #ffaa00",
+                    "multi_launcher": "bold #aa55ff",
+                }
+                icon_style = orig_colors.get(orig_type, "bold #a0a0a0")
+                name_style = "italic"
+        else:
+            res_colors = {
+                "directory": "bold #0088ff",
+                "file": "bold #a0a0a0",
+                "script": "bold #ffaa00",
+                "executable": "bold #00ff00",
+                "url": "bold #00ffff",
+                "launch_profile": "bold #ffaa00",
+                "multi_launcher": "bold #aa55ff",
+            }
+            icon_style = res_colors.get(resource_type, "bold #a0a0a0")
+            name_style = ""
+    else:
+        icon_style = ""
+        name_style = ""
+
+    if pinned:
+        pin_marker = icon_registry.get_pin_marker()
+        label.append(pin_marker, style="bold #ffaa00")
+        label.append(" ")
+
+    label.append(icon, style=icon_style)
+    label.append(" ")
+    label.append(node.name, style=name_style)
+
+    if is_reference:
+        if is_broken:
+            warning_ind = icon_registry.resolve(
+                "resource", "reference", is_reference=True, is_broken=True
+            )
+            label.append(" ")
+            label.append(warning_ind, style="bold #ff5555")
+            label.append(" [Broken]", style="bold #ff5555")
+        else:
+            link_ind = icon_registry.resolve("resource", "reference", is_reference=True)
+            label.append(" ")
+            label.append(link_ind, style="bold #00ffff")
+
+    return label
 
 
 class NodeTreeView(Tree[uuid.UUID]):
@@ -291,6 +434,17 @@ class NodeTreeView(Tree[uuid.UUID]):
         except Exception:
             pinned_node_ids = set()
 
+        # Bulk query for fast context resolution without N+1 queries
+        # during recursive build
+        try:
+            all_refs = self.reference_service.repository.list_all()
+            all_nodes = self.node_service.repository.list_all()
+            nodes_by_id = {n.id: n for n in all_nodes}
+            ref_by_node_id = {r.reference_node_id: r for r in all_refs}
+        except Exception:
+            nodes_by_id = {}
+            ref_by_node_id = {}
+
         def add_recursive(
             parent_tree_node: TextualTreeNode[uuid.UUID], app_tree_node: TreeNode
         ) -> None:
@@ -300,26 +454,32 @@ class NodeTreeView(Tree[uuid.UUID]):
             if expanded_node_ids is not None and db_node.id in expanded_node_ids:
                 should_expand = True
 
-            # Resolve icon
-            from pathtree.utils.icons import icon_registry
-
-            if db_node.node_kind == "resource" and db_node.resource_type == "reference":
-                if self.reference_service.is_broken(db_node.id):
-                    icon = "↗ ⚠"
-                    label_name = f"{db_node.name} [Broken]"
+            # Resolve context in bulk
+            is_ref = (
+                db_node.node_kind == "resource" and db_node.resource_type == "reference"
+            )
+            is_broken = False
+            orig_node = None
+            if is_ref:
+                ref_record = ref_by_node_id.get(db_node.id)
+                if (
+                    ref_record is None
+                    or ref_record.original_node_id is None
+                    or ref_record.original_node_id not in nodes_by_id
+                ):
+                    is_broken = True
                 else:
-                    orig_node = self.reference_service.get_original_node(db_node.id)
-                    icon = f"↗ {icon_registry.get_icon(orig_node)}"
-                    label_name = db_node.name
-            else:
-                icon = icon_registry.get_icon(db_node)
-                label_name = db_node.name
+                    is_broken = False
+                    orig_node = nodes_by_id[ref_record.original_node_id]
 
-            # Prepend pin marker if the node is globally pinned
-            if db_node.id in pinned_node_ids:
-                icon = f"{icon_registry.get_pin_marker()} {icon}"
+            context_dict = {
+                "pinned": db_node.id in pinned_node_ids,
+                "is_reference": is_ref,
+                "is_broken": is_broken,
+                "orig_node": orig_node,
+            }
 
-            label = IconText(label_name, icon)
+            label = build_node_label(db_node, context_dict)
 
             if children:
                 # Set expand to expand_all or if in expanded_node_ids
