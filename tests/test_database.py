@@ -400,7 +400,7 @@ def test_legacy_workspaces_migration(session):
     # 3. Check that the System and Custom groups exist, and children have been relocated
     children = node_repo.list_children(ws.id)
     assert len(children) == 2
-    system_group = next(c for c in children if c.name == "System")
+    next(c for c in children if c.name == "System")
     custom_group = next(c for c in children if c.name == "Custom")
 
     # Folder must be moved under Custom
