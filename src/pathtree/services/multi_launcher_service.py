@@ -63,14 +63,9 @@ class MultiLauncherService:
         try:
             # 1. Lazy create 'Multi Launchers' system group if node_id is None
             if node_id is None:
-                if self.node_service._has_custom_group(workspace_id):
-                    group = self.node_service.get_system_subsection(
-                        workspace_id, "multi_launcher"
-                    )
-                else:
-                    group = self.node_service.get_or_create_system_group(
-                        workspace_id, "multi_launchers", "Multi Launchers"
-                    )
+                group = self.node_service.get_or_create_system_group(
+                    workspace_id, "multi_launchers", "Multi Launchers"
+                )
                 # Create node representation
                 node = self.node_service.create_node(
                     name=name,
@@ -148,14 +143,9 @@ class MultiLauncherService:
 
         # Move tree node under workspace's "Multi Launchers" system group upon edit
         try:
-            if self.node_service._has_custom_group(launcher.workspace_id):
-                group = self.node_service.get_system_subsection(
-                    launcher.workspace_id, "multi_launcher"
-                )
-            else:
-                group = self.node_service.get_or_create_system_group(
-                    launcher.workspace_id, "multi_launchers", "Multi Launchers"
-                )
+            group = self.node_service.get_or_create_system_group(
+                launcher.workspace_id, "multi_launchers", "Multi Launchers"
+            )
             node = self.node_service.get_node(launcher.launcher_node_id)
             if node and node.parent_id != group.id:
                 self.node_service.move_node(launcher.launcher_node_id, group.id)

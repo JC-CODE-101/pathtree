@@ -217,8 +217,7 @@ def init_db(engine: Engine) -> None:
                     "ALTER TABLE nodes ADD COLUMN system_role VARCHAR DEFAULT NULL;"
                 )
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_nodes_system_role ON nodes (system_role);"
+                    "CREATE INDEX IF NOT EXISTS ix_nodes_system_role ON nodes (system_role);"
                 )
 
                 # Create launch_profiles table
@@ -238,30 +237,20 @@ def init_db(engine: Engine) -> None:
                         created_at DATETIME NOT NULL,
                         updated_at DATETIME NOT NULL,
                         PRIMARY KEY (id),
-                        FOREIGN KEY(profile_node_id)
-                            REFERENCES nodes (id) ON DELETE CASCADE,
-                        FOREIGN KEY(workspace_id)
-                            REFERENCES nodes (id) ON DELETE CASCADE,
-                        FOREIGN KEY(target_node_id)
-                            REFERENCES nodes (id) ON DELETE SET NULL,
-                        FOREIGN KEY(working_directory_node_id)
-                            REFERENCES nodes (id) ON DELETE SET NULL
+                        FOREIGN KEY(profile_node_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(workspace_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(target_node_id) REFERENCES nodes (id) ON DELETE SET NULL,
+                        FOREIGN KEY(working_directory_node_id) REFERENCES nodes (id) ON DELETE SET NULL
                     );
                 """)
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_launch_profiles_profile_node_id "
-                    "ON launch_profiles (profile_node_id);"
+                    "CREATE INDEX IF NOT EXISTS ix_launch_profiles_profile_node_id ON launch_profiles (profile_node_id);"
                 )
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_launch_profiles_workspace_id "
-                    "ON launch_profiles (workspace_id);"
+                    "CREATE INDEX IF NOT EXISTS ix_launch_profiles_workspace_id ON launch_profiles (workspace_id);"
                 )
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_launch_profiles_target_node_id "
-                    "ON launch_profiles (target_node_id);"
+                    "CREATE INDEX IF NOT EXISTS ix_launch_profiles_target_node_id ON launch_profiles (target_node_id);"
                 )
 
                 cursor.execute("PRAGMA user_version = 4;")
@@ -368,21 +357,15 @@ def init_db(engine: Engine) -> None:
                         created_at DATETIME NOT NULL,
                         updated_at DATETIME NOT NULL,
                         PRIMARY KEY (id),
-                        FOREIGN KEY(reference_node_id)
-                            REFERENCES nodes (id) ON DELETE CASCADE,
-                        FOREIGN KEY(original_node_id)
-                            REFERENCES nodes (id) ON DELETE SET NULL
+                        FOREIGN KEY(reference_node_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(original_node_id) REFERENCES nodes (id) ON DELETE SET NULL
                     );
                 """)
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_resource_references_reference_node_id "
-                    "ON resource_references (reference_node_id);"
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_reference_node_id ON resource_references (reference_node_id);"
                 )
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_resource_references_original_node_id "
-                    "ON resource_references (original_node_id);"
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_original_node_id ON resource_references (original_node_id);"
                 )
 
                 cursor.execute("PRAGMA user_version = 6;")
@@ -399,11 +382,10 @@ def init_db(engine: Engine) -> None:
                     "All changes rolled back."
                 ) from e
 
-        # Final Verification Check: Ensure references table exists
+        # Final Verification Check: Ensure 'resource_references' table exists on startup
         cursor = connection.execute(
             text(
-                "SELECT name FROM sqlite_master WHERE type='table' "
-                "AND name='resource_references';"
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='resource_references';"
             )
         )
         if cursor.first() is None:
@@ -419,21 +401,15 @@ def init_db(engine: Engine) -> None:
                         created_at DATETIME NOT NULL,
                         updated_at DATETIME NOT NULL,
                         PRIMARY KEY (id),
-                        FOREIGN KEY(reference_node_id)
-                            REFERENCES nodes (id) ON DELETE CASCADE,
-                        FOREIGN KEY(original_node_id)
-                            REFERENCES nodes (id) ON DELETE SET NULL
+                        FOREIGN KEY(reference_node_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(original_node_id) REFERENCES nodes (id) ON DELETE SET NULL
                     );
                 """)
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_resource_references_reference_node_id "
-                    "ON resource_references (reference_node_id);"
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_reference_node_id ON resource_references (reference_node_id);"
                 )
                 cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS "
-                    "ix_resource_references_original_node_id "
-                    "ON resource_references (original_node_id);"
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_original_node_id ON resource_references (original_node_id);"
                 )
                 cursor.execute("PRAGMA user_version = 6;")
                 dbapi_conn.commit()
@@ -444,8 +420,7 @@ def init_db(engine: Engine) -> None:
                 except Exception:
                     pass
                 raise DatabaseMigrationError(
-                    "Startup verification and creation of "
-                    f"resource_references failed: {e}"
+                    f"Startup verification and creation of resource_references failed: {e}"
                 ) from e
 
         # Relocate legacy workspaces and their children deterministically
@@ -454,14 +429,13 @@ def init_db(engine: Engine) -> None:
 
 
 def migrate_existing_workspaces(connection) -> None:
-    """Migrate all legacy workspaces to new System/Custom layout."""
+    """Migrate all legacy workspaces and their children to the new System/Custom layout."""
     import uuid
 
     # 1. Fetch all nodes from nodes table
     cursor = connection.execute(
         text(
-            "SELECT id, parent_id, name, node_kind, "
-            "resource_type, system_role FROM nodes;"
+            "SELECT id, parent_id, name, node_kind, resource_type, system_role FROM nodes;"
         )
     )
     all_nodes = []
@@ -500,20 +474,14 @@ def migrate_existing_workspaces(connection) -> None:
 
     # Helper to create a node in SQL
     def db_create_node(
-        name: str,
-        node_kind: str,
-        parent_id: str | None,
-        system_role: str | None = None,
+        name: str, node_kind: str, parent_id: str | None, system_role: str | None = None
     ) -> str:
         nid = uuid.uuid4().hex
         pid = parent_id.replace("-", "") if parent_id else None
         connection.execute(
             text(
-                "INSERT INTO nodes (id, name, node_kind, parent_id, "
-                "system_role, is_favorite, is_temporary, sort_order, "
-                "created_at, updated_at, node_type) "
-                "VALUES (:id, :name, :node_kind, :parent_id, :system_role, "
-                "0, 0, 0, datetime('now'), datetime('now'), 'Folder');"
+                "INSERT INTO nodes (id, name, node_kind, parent_id, system_role, is_favorite, is_temporary, sort_order, created_at, updated_at, node_type) "
+                "VALUES (:id, :name, :node_kind, :parent_id, :system_role, 0, 0, 0, datetime('now'), datetime('now'), 'Folder');"
             ),
             {
                 "id": nid,
@@ -534,7 +502,7 @@ def migrate_existing_workspaces(connection) -> None:
         nodes_by_id[nid] = new_node
         return nid
 
-    # Ensure System, Custom groups, and 7 System subsections exist
+    # For each workspace, ensure System and Custom groups exist, and System has its 7 subsections
     workspace_layouts = {}
     for ws in workspaces:
         ws_id = ws["id"]
@@ -621,140 +589,6 @@ def migrate_existing_workspaces(connection) -> None:
                     text("UPDATE nodes SET parent_id = :parent_id WHERE id = :id;"),
                     {"parent_id": target_parent, "id": nid},
                 )
-
-    # Clean up duplicate groups (Section 3)
-    cleanup_legacy_duplicate_groups(connection)
-
-
-def cleanup_legacy_duplicate_groups(connection) -> None:
-    """Merge any root-level duplicate Launch Profiles or Multi Launchers."""
-
-    from sqlmodel import text
-
-    cursor = connection.execute(
-        text(
-            "SELECT id, parent_id, name, node_kind, "
-            "resource_type, system_role FROM nodes;"
-        )
-    )
-    all_nodes = []
-    for row in cursor.all():
-        row_dict = dict(row._mapping)
-        if row_dict["id"]:
-            row_dict["id"] = row_dict["id"].replace("-", "")
-        if row_dict["parent_id"]:
-            row_dict["parent_id"] = row_dict["parent_id"].replace("-", "")
-        all_nodes.append(row_dict)
-
-    workspaces = [n for n in all_nodes if n["node_kind"] == "workspace"]
-
-    for ws in workspaces:
-        ws_id = ws["id"]
-
-        # 1. Locate canonical System group under this workspace
-        cursor = connection.execute(
-            text(
-                "SELECT id FROM nodes WHERE parent_id = :parent_id "
-                "AND node_kind = 'system_group' AND system_role = 'system';"
-            ),
-            {"parent_id": ws_id},
-        )
-        sys_row = cursor.first()
-        if not sys_row:
-            continue
-        sys_group_id = sys_row[0].replace("-", "")
-
-        # 2. Locate canonical Launch Profiles and Multi Launchers groups
-        # under System group
-        cursor = connection.execute(
-            text(
-                "SELECT id, system_role FROM nodes "
-                "WHERE parent_id = :parent_id AND node_kind = 'system_group' "
-                "AND system_role IN ('launch_profiles', 'multi_launchers');"
-            ),
-            {"parent_id": sys_group_id},
-        )
-        canonical_subsections = {
-            row[1]: row[0].replace("-", "") for row in cursor.all()
-        }
-
-        # 3. Locate legacy root-level groups directly under Workspace root
-        cursor = connection.execute(
-            text(
-                "SELECT id, name FROM nodes WHERE parent_id = :parent_id "
-                "AND node_kind = 'system_group' AND system_role IS NULL "
-                "AND (name = 'Launch Profiles' OR name = 'Multi Launchers');"
-            ),
-            {"parent_id": ws_id},
-        )
-        legacy_groups = cursor.all()
-
-        for leg_id, leg_name in legacy_groups:
-            leg_id = leg_id.replace("-", "")
-            # Map legacy name to system_role
-            role_map = {
-                "Launch Profiles": "launch_profiles",
-                "Multi Launchers": "multi_launchers",
-            }
-            role = role_map.get(leg_name)
-            if not role or role not in canonical_subsections:
-                continue
-
-            canonical_parent_id = canonical_subsections[role]
-
-            # 4. Fetch all child nodes under this legacy group
-            cursor = connection.execute(
-                text("SELECT id, name FROM nodes WHERE parent_id = :parent_id;"),
-                {"parent_id": leg_id},
-            )
-            children = cursor.all()
-
-            for child_id, child_name in children:
-                child_id = child_id.replace("-", "")
-
-                # 5. Handle naming conflicts in canonical destination
-                cursor = connection.execute(
-                    text(
-                        "SELECT id FROM nodes WHERE parent_id = :parent_id "
-                        "AND name = :name;"
-                    ),
-                    {"parent_id": canonical_parent_id, "name": child_name},
-                )
-                conflict_row = cursor.first()
-                if conflict_row:
-                    suffix = 1
-                    base_name = child_name
-                    while True:
-                        new_name = f"{base_name} ({suffix})"
-                        cursor = connection.execute(
-                            text(
-                                "SELECT id FROM nodes WHERE parent_id = :parent_id "
-                                "AND name = :name;"
-                            ),
-                            {"parent_id": canonical_parent_id, "name": new_name},
-                        )
-                        if not cursor.first():
-                            child_name = new_name
-                            break
-                        suffix += 1
-
-                # Update child node's parent_id and name
-                connection.execute(
-                    text(
-                        "UPDATE nodes SET parent_id = :parent_id, name = :name "
-                        "WHERE id = :id;"
-                    ),
-                    {
-                        "parent_id": canonical_parent_id,
-                        "name": child_name,
-                        "id": child_id,
-                    },
-                )
-
-            # 6. Delete empty legacy group
-            connection.execute(
-                text("DELETE FROM nodes WHERE id = :id;"), {"id": leg_id}
-            )
 
 
 _engine: Engine | None = None

@@ -195,9 +195,8 @@ class NodeService:
             raise ValidationError("Workspace may only exist at Root.")
 
         if node_kind in ("folder", "resource", "system_group") and parent_id is None:
-            kind_label = node_kind.capitalize().replace("_", " ")
             raise ValidationError(
-                f"{kind_label} cannot be created under Root "
+                f"{node_kind.capitalize().replace('_', ' ')} cannot be created under Root "
                 "(parent must be Workspace or Folder)."
             )
 
@@ -213,7 +212,7 @@ class NodeService:
         if parent_node is None:
             raise ParentNotFoundError(f"Parent node {parent_id} does not exist.")
 
-        # 3. Rejects parent nodes that are not in allowed kinds list
+        # 3. Rejects parent nodes that are not in {"workspace", "folder", "system_group"}
         if parent_node.node_kind not in {"workspace", "folder", "system_group"}:
             raise InvalidParentKindError(
                 f"Parent node {parent_id} kind "
@@ -545,53 +544,6 @@ class NodeService:
         - combination check of node_kind and resource_type
         - structural node contains no path check
         """
-        # Prevent duplicate managed system groups at root level (Section 4)
-        if node_kind == "system_group" and system_role in (
-            "launch_profiles",
-            "multi_launchers",
-        ):
-            if parent_id is None:
-                raise ValidationError(
-                    f"Managed group {system_role} cannot be created under Root."
-                )
-            parent_node = self.repository.get_by_id(parent_id)
-            if not parent_node:
-                raise ValidationError(f"Parent for {system_role} not found.")
-
-            if parent_node.node_kind == "workspace":
-                if self._has_custom_group(parent_node.id):
-                    raise ValidationError(
-                        f"Managed group {system_role} must be placed "
-                        "under System group in this workspace."
-                    )
-            elif (
-                parent_node.node_kind == "system_group"
-                and parent_node.system_role == "system"
-            ):
-                pass
-            else:
-                raise ValidationError(
-                    f"Managed group {system_role} must be a child of "
-                    "System group (or a legacy Workspace)."
-                )
-
-            # Ensure unique per workspace
-            ws_node = self._find_workspace_for_node(parent_id)
-            if ws_node:
-                from sqlmodel import select
-
-                stmt = select(Node).where(
-                    Node.node_kind == "system_group", Node.system_role == system_role
-                )
-                existing = self.repository.session.exec(stmt).all()
-                for ext in existing:
-                    ext_ws = self._find_workspace_for_node(ext.id)
-                    if ext_ws and ext_ws.id == ws_node.id:
-                        raise ValidationError(
-                            f"A managed group with role '{system_role}' "
-                            "already exists for this workspace."
-                        )
-
         # 1. Trim name and reject empty names
         if name is None:
             raise EmptyNodeNameError("Name cannot be None.")
@@ -1067,8 +1019,14 @@ class NodeService:
         """Find or lazily create exactly one managed system group under a workspace."""
         from sqlmodel import select
 
+        # Resolve where this group should reside
+        if self._has_custom_group(workspace_id):
+            parent_id = self.get_system_group(workspace_id).id
+        else:
+            parent_id = workspace_id
+
         statement = select(Node).where(
-            Node.parent_id == workspace_id,
+            Node.parent_id == parent_id,
             Node.node_kind == "system_group",
             Node.system_role == system_role,
         )
@@ -1079,7 +1037,7 @@ class NodeService:
         return self.create_node(
             name=default_name,
             node_kind="system_group",
-            parent_id=workspace_id,
+            parent_id=parent_id,
             system_role=system_role,
         )
 
@@ -1155,20 +1113,17 @@ class NodeService:
                         profile.working_directory_node_id = None
                         launch_profile_repo.update(profile)
 
-                    # 3. If a launch profile node is itself deleted,
-                    # delete its launch profile record
+                    # 3. If a launch profile node is itself deleted, delete its launch profile record
                     if (
                         target_node.node_kind == "resource"
                         and target_node.resource_type == "launch_profile"
                     ):
                         profile = launch_profile_repo.get_by_profile_node_id(nid)
                         if profile:
-                            # Delete referencing MultiLauncherItems
+                            # Delete referencing MultiLauncherItems to avoid foreign key violations
                             from sqlmodel import delete
 
-                            from pathtree.models.multi_launcher import (
-                                MultiLauncherItem,
-                            )
+                            from pathtree.models.multi_launcher import MultiLauncherItem
 
                             try:
                                 statement = delete(MultiLauncherItem).where(
@@ -1180,8 +1135,7 @@ class NodeService:
                                 pass
                             launch_profile_repo.delete(profile.id)
 
-                    # 3b. If a multi launcher node is itself deleted,
-                    # delete its multi launcher record
+                    # 3b. If a multi launcher node is itself deleted, delete its multi launcher record
                     if (
                         target_node.node_kind == "resource"
                         and target_node.resource_type == "multi_launcher"

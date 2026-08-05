@@ -337,15 +337,6 @@ class MainScreen(Screen[None]):
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[uuid.UUID]) -> None:
         """Update the details panel whenever the highlighted node changes."""
-        try:
-            tree = self.query_one("#tree-view", NodeTreeView)
-            if (
-                tree.cursor_node is not None
-                and tree.cursor_node.data != event.node.data
-            ):
-                return
-        except Exception:
-            pass
         self._update_details_and_selection()
 
     def on_node_tree_view_activate_node(self, event: NodeTreeView.ActivateNode) -> None:
@@ -601,10 +592,10 @@ class MainScreen(Screen[None]):
 
             tree = self.query_one("#tree-view", NodeTreeView)
 
-            def handle_create_finished(changed: bool) -> None:
-                if changed:
+            def handle_create_finished(new_node_id: uuid.UUID | None) -> None:
+                if new_node_id is not None:
                     self.app.notify("Launch Profile created successfully.")
-                    self.refresh_tree()
+                    self.refresh_tree(selected_node_id=new_node_id)
                 tree.focus()
 
             self.app.push_screen(
@@ -645,10 +636,10 @@ class MainScreen(Screen[None]):
                     context.node.id
                 )
 
-                def handle_edit_finished(changed: bool) -> None:
-                    if changed:
+                def handle_edit_finished(updated_node_id: uuid.UUID | None) -> None:
+                    if updated_node_id is not None:
                         self.app.notify("Launch Profile updated.")
-                        self.refresh_tree(selected_node_id=context.node.id)
+                        self.refresh_tree(selected_node_id=updated_node_id)
                     tree.focus()
 
                 self.app.push_screen(
@@ -1014,10 +1005,12 @@ class MainScreen(Screen[None]):
             try:
                 profile = self.launch_profile_service.get_profile_for_node(node_id)
 
-                def handle_profile_edit_finished(changed: bool) -> None:
-                    if changed:
+                def handle_profile_edit_finished(
+                    updated_node_id: uuid.UUID | None,
+                ) -> None:
+                    if updated_node_id is not None:
                         self.app.notify("Launch Profile updated.")
-                        self.refresh_tree(selected_node_id=node_id)
+                        self.refresh_tree(selected_node_id=updated_node_id)
                     tree.focus()
 
                 self.app.push_screen(

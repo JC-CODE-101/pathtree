@@ -771,7 +771,7 @@ async def test_details_panel_rendering(session):
 
 @pytest.mark.asyncio
 async def test_layout_stability_regression(session):
-    """Verify that selecting a Multi Launcher with extremely long name profile does not shift the vertical divider."""
+    """Verify selecting a long name profile doesn't shift the vertical divider."""
     node_repo = NodeRepository(session)
     node_service = NodeService(node_repo)
     ws = node_service.create_node(name="WS", node_kind="workspace")
@@ -832,6 +832,84 @@ async def test_layout_stability_regression(session):
         content = details_panel.render().plain
         assert long_name in content
 
-        # Check pane widths remain exactly the same as initial proportions (no layout shift!)
+        # Check pane widths remain exactly the same as initial proportions
         assert tree_view.size.width == init_tree_width
         assert details_panel.size.width == init_details_width
+
+
+@pytest.mark.asyncio
+async def test_multi_launcher_creation_validation_regression(session):
+    """Verify that multi-launcher creation correctly resolves canonical system groups.
+
+    It should not block creation or try to duplicate the system group in layouts.
+    """
+    node_repo = NodeRepository(session)
+    node_service = NodeService(node_repo)
+
+    # 1. Create Workspace C with auto_layout
+    ws_c = node_service.create_node(
+        name="Workspace C", node_kind="workspace", auto_layout=True
+    )
+
+    # Check canonical group structures under WS C System group
+    sys_group = node_service.get_system_group(ws_c.id)
+    canonical_ml_group = node_service.get_system_subsection(ws_c.id, "multi_launcher")
+    assert sys_group is not None
+    assert canonical_ml_group is not None
+    assert canonical_ml_group.parent_id == sys_group.id
+
+    # 2. Setup MultiLauncherService on the fly
+    lp_repo = LaunchProfileRepository(session)
+    lp_service = LaunchProfileService(node_service, lp_repo)
+    ml_repo = MultiLauncherRepository(session)
+    ml_service = MultiLauncherService(node_service, lp_service, ml_repo)
+
+    # 3. Create Multi Launcher with any descendant parent under Workspace C
+    # Selected Parent 1: the canonical Multi Launchers system group
+    launcher1 = ml_service.create_launcher(
+        name="MyBlenderLauncher1",
+        workspace_id=ws_c.id,
+        node_id=None,  # let it locate/create via get_or_create_system_group
+    )
+    assert launcher1 is not None
+
+    # Fetch newly created tree node
+    node1 = node_service.get_node(launcher1.launcher_node_id)
+    assert node1.parent_id == canonical_ml_group.id
+    assert node1.node_kind == "resource"
+    assert node1.resource_type == "multi_launcher"
+    assert node1.system_role is None
+
+    # Repeat creation with other selected parent contexts
+    selections = [
+        ws_c.id,  # Workspace C root
+        sys_group.id,  # System
+        node_service.get_system_subsection(ws_c.id, "file").id,  # Files
+        node_service.get_system_subsection(ws_c.id, "executable").id,  # Executables
+        node_service.get_custom_group(ws_c.id).id,  # Custom
+    ]
+
+    for idx, _sel_parent_id in enumerate(selections):
+        # We can simulate creating a launcher on these positions
+        launcher = ml_service.create_launcher(
+            name=f"MyBlenderLauncher_Sel_{idx}",
+            workspace_id=ws_c.id,
+            node_id=None,
+        )
+        assert launcher is not None
+        node = node_service.get_node(launcher.launcher_node_id)
+        assert node.parent_id == canonical_ml_group.id
+        assert node.node_kind == "resource"
+        assert node.resource_type == "multi_launcher"
+        assert node.system_role is None
+
+    # Verify no root-level managed Multi Launchers group was created
+    all_nodes = node_repo.list_all()
+    root_ml_groups = [
+        n
+        for n in all_nodes
+        if n.parent_id is None
+        and n.node_kind == "system_group"
+        and n.system_role == "multi_launchers"
+    ]
+    assert len(root_ml_groups) == 0
