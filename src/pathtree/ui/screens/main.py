@@ -170,6 +170,29 @@ class MainScreen(Screen[None]):
                 ),
             )
 
+        from pathtree.actions.reference import ReferenceActionProvider
+
+        self.action_registry.register(
+            "resource",
+            "reference",
+            ReferenceActionProvider(self.node_service),
+        )
+
+    @property
+    def reference_service(self):
+        """Lazily initialize the reference service to protect against mocks."""
+        if not hasattr(self, "_reference_service_lazy"):
+            from pathtree.database.repository import ResourceReferenceRepository
+            from pathtree.services.resource_reference_service import (
+                ResourceReferenceService,
+            )
+
+            self._reference_service_lazy = ResourceReferenceService(
+                self.node_service,
+                ResourceReferenceRepository(self.node_service.repository.session),
+            )
+        return self._reference_service_lazy
+
     def compose(self) -> ComposeResult:
         """Compose the screen widgets."""
         yield Header()
@@ -238,7 +261,7 @@ class MainScreen(Screen[None]):
 
         self.call_after_refresh(self._update_details_and_selection)
 
-    def _update_details_and_selection(self) -> None:
+    def _update_details_and_selection(self, force_update: bool = False) -> None:
         """Utility to safely update details panel based on selected tree cursor."""
         tree = self.query_one("#tree-view", NodeTreeView)
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
@@ -256,13 +279,17 @@ class MainScreen(Screen[None]):
         if cursor_node is None or cursor_node.data is None:
             # We are filtered and no matches
             details_panel.update_node(None, empty_message="No matching nodes")
+            self._last_selected_node_id = None
+            return
+
+        # AVOID duplicate updates if selection hasn't changed (avoids mouse lag)
+        if not force_update and cursor_node.data == self._last_selected_node_id:
             return
 
         # Load node details
         node = self.node_service.get_node(cursor_node.data)
         details_panel.update_node(node)
-        if tree.has_focus or self._last_selected_node_id is None:
-            self._last_selected_node_id = cursor_node.data
+        self._last_selected_node_id = cursor_node.data
 
         # Keep current state available for persistence
         self._update_persistent_state()
@@ -346,6 +373,10 @@ class MainScreen(Screen[None]):
             details_panel.update_error("Node not found.")
             return
 
+        if node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be modified.", severity="error")
+            return
+
         actions = []
         provider = None
         context = None
@@ -361,6 +392,21 @@ class MainScreen(Screen[None]):
                     output_path=self.output_path,
                 )
                 actions.extend(provider.get_available_actions(context))
+
+            # Dynamically inject Create Reference for any real resource
+            if node.resource_type != "reference":
+                from pathtree.actions.base import ResourceAction
+
+                actions.append(
+                    ResourceAction(
+                        id="create_reference",
+                        label="Create Reference",
+                        description=(
+                            "Create a reference to this resource in another "
+                            "workspace or folder"
+                        ),
+                    )
+                )
 
         # Dynamically append dynamic Pin/Unpin actions based on current pin state
         from pathtree.actions.base import ResourceAction
@@ -395,6 +441,108 @@ class MainScreen(Screen[None]):
                     self.pin_service.unpin_node(node.id)
                     self.app.notify(f'Unpinned "{node.name}"')
                     self.refresh_tree(selected_node_id=node.id)
+                elif result.action_id == "create_reference":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree()
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            original_node_id=node.id,
+                            mode="create",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "reconnect":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            reference_node_id=node.id,
+                            mode="reconnect",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "copy_reference_to_workspace":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree()
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            reference_node_id=node.id,
+                            mode="copy",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "move_reference_to_workspace":
+                    from pathtree.ui.dialogs.reference_manager import (
+                        ReferenceManagerDialog,
+                    )
+
+                    def on_ref_mgr_finished(changed: bool) -> None:
+                        if changed:
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        ReferenceManagerDialog(
+                            self.node_service,
+                            self.reference_service,
+                            reference_node_id=node.id,
+                            mode="move",
+                        ),
+                        callback=on_ref_mgr_finished,
+                    )
+                elif result.action_id == "rename_reference":
+                    from pathtree.ui.dialogs.edit_node import EditNodeDialog
+
+                    def on_rename_finished(success: bool) -> None:
+                        if success:
+                            self.app.notify(f'Updated reference "{node.name}"')
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        EditNodeDialog(self.node_service, node.id),
+                        callback=on_rename_finished,
+                    )
+                elif result.action_id == "move_reference":
+                    from pathtree.ui.dialogs.move_node import MoveNodeDialog
+
+                    def on_move_finished(success: bool) -> None:
+                        if success:
+                            self.app.notify(f'Moved reference "{node.name}"')
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        MoveNodeDialog(self.node_service, node.id),
+                        callback=on_move_finished,
+                    )
                 else:
                     if provider and context:
                         self.execute_action(result.action_id, provider, context)
@@ -444,10 +592,10 @@ class MainScreen(Screen[None]):
 
             tree = self.query_one("#tree-view", NodeTreeView)
 
-            def handle_create_finished(changed: bool) -> None:
-                if changed:
+            def handle_create_finished(new_node_id: uuid.UUID | None) -> None:
+                if new_node_id is not None:
                     self.app.notify("Launch Profile created successfully.")
-                    self.refresh_tree()
+                    self.refresh_tree(selected_node_id=new_node_id)
                 tree.focus()
 
             self.app.push_screen(
@@ -488,10 +636,10 @@ class MainScreen(Screen[None]):
                     context.node.id
                 )
 
-                def handle_edit_finished(changed: bool) -> None:
-                    if changed:
+                def handle_edit_finished(updated_node_id: uuid.UUID | None) -> None:
+                    if updated_node_id is not None:
                         self.app.notify("Launch Profile updated.")
-                        self.refresh_tree(selected_node_id=context.node.id)
+                        self.refresh_tree(selected_node_id=updated_node_id)
                     tree.focus()
 
                 self.app.push_screen(
@@ -614,6 +762,22 @@ class MainScreen(Screen[None]):
         if result.message:
             self.app.notify(result.message)
 
+        # Handle specific return outputs from Reference provider
+        if (
+            context.node.node_kind == "resource"
+            and context.node.resource_type == "reference"
+        ):
+            if (
+                action_id in ("open", "locate_original")
+                and result.output_value is not None
+            ):
+                target_orig_id = result.output_value
+                if action_id == "open":
+                    self.activate_node(target_orig_id)
+                elif action_id == "locate_original":
+                    self.refresh_tree(selected_node_id=target_orig_id)
+                return
+
         # Render output_value according to the typed target
         if result.target == ResourceActionResultTarget.DETAILS:
             if result.output_value is not None:
@@ -633,6 +797,19 @@ class MainScreen(Screen[None]):
         node = self.node_service.get_node(node_id)
         if not node:
             details_panel.update_error(f"Node {node_id} does not exist.")
+            return
+
+        # --- Automatic delegation of Reference nodes to their original targets ---
+        if node.node_kind == "resource" and node.resource_type == "reference":
+            ref = self.reference_service.get_reference_by_node_id(node_id)
+            if not ref or ref.original_node_id is None:
+                details_panel.update_error("Broken Reference")
+                return
+            orig_node = self.node_service.get_node(ref.original_node_id)
+            if not orig_node:
+                details_panel.update_error("Broken Reference")
+                return
+            self.activate_node(orig_node.id)
             return
 
         provider = self.action_registry.get_provider(node.node_kind, node.resource_type)
@@ -744,7 +921,9 @@ class MainScreen(Screen[None]):
         if not filtered_nodes and is_now_non_empty:
             tree.move_cursor(None)
 
-        self.call_after_refresh(self._update_details_and_selection)
+        self.call_after_refresh(
+            lambda: self._update_details_and_selection(force_update=True)
+        )
 
     def on_node_tree_view_focus_search(self, event: NodeTreeView.FocusSearch) -> None:
         """Focus SearchInput when '/' or 's' is pressed in the tree."""
@@ -758,11 +937,13 @@ class MainScreen(Screen[None]):
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
 
-        # Default parent behavior:
-        # No selection -> Root
-        # Workspace -> selected workspace
-        # Folder -> selected folder
-        # Directory resource -> parent of directory resource
+        # autoritative workspace context resolution
+        selected_node_id = tree.cursor_node.data if tree.cursor_node else None
+        current_workspace_id = self.node_service.resolve_workspace_context(
+            selected_node_id
+        )
+
+        # Default parent behavior matching legacy expectations
         default_parent_id = None
         if tree.cursor_node is not None and tree.cursor_node.data is not None:
             node = self.node_service.get_node(tree.cursor_node.data)
@@ -771,6 +952,8 @@ class MainScreen(Screen[None]):
                     default_parent_id = node.id
                 elif node.node_kind == "resource":
                     default_parent_id = node.parent_id
+                else:
+                    default_parent_id = node.id
 
         def handle_add_finished(new_node_id: uuid.UUID | None) -> None:
             if new_node_id is not None:
@@ -790,7 +973,11 @@ class MainScreen(Screen[None]):
             tree.focus()
 
         self.app.push_screen(
-            AddNodeDialog(self.node_service, default_parent_id=default_parent_id),
+            AddNodeDialog(
+                self.node_service,
+                workspace_id=current_workspace_id,
+                default_parent_id=default_parent_id,
+            ),
             callback=handle_add_finished,
         )
 
@@ -800,12 +987,46 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
+        node_id = tree.cursor_node.data
+        node = self.node_service.get_node(node_id)
+        if node is not None and node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be edited.", severity="error")
+            return
+
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
-        node_id = tree.cursor_node.data
-
-        node = self.node_service.get_node(node_id)
         if (
+            node is not None
+            and node.node_kind == "resource"
+            and node.resource_type == "launch_profile"
+        ):
+            from pathtree.ui.dialogs.edit_profile import EditProfileDialog
+
+            try:
+                profile = self.launch_profile_service.get_profile_for_node(node_id)
+
+                def handle_profile_edit_finished(
+                    updated_node_id: uuid.UUID | None,
+                ) -> None:
+                    if updated_node_id is not None:
+                        self.app.notify("Launch Profile updated.")
+                        self.refresh_tree(selected_node_id=updated_node_id)
+                    tree.focus()
+
+                self.app.push_screen(
+                    EditProfileDialog(
+                        self.node_service,
+                        self.launch_profile_service,
+                        profile_id=profile.id,
+                    ),
+                    callback=handle_profile_edit_finished,
+                )
+            except Exception as e:
+                details_panel = self.query_one("#details-panel", NodeDetailsPanel)
+                details_panel.update_error(str(e))
+            return
+
+        elif (
             node is not None
             and node.node_kind == "resource"
             and node.resource_type == "multi_launcher"
@@ -859,9 +1080,14 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
+        node_id = tree.cursor_node.data
+        node = self.node_service.get_node(node_id)
+        if node is not None and node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be moved.", severity="error")
+            return
+
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
-        node_id = tree.cursor_node.data
 
         def handle_move_finished(success: bool) -> None:
             if success:
@@ -885,13 +1111,17 @@ class MainScreen(Screen[None]):
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
 
-        # Capture expansion state before opening the dialog
-        captured_expanded_node_ids = tree.get_expanded_node_ids()
-
         node_id = tree.cursor_node.data
         node = self.node_service.get_node(node_id)
         if node is None:
             return
+
+        if node.node_kind == "system_group":
+            self.app.notify("Managed sections cannot be deleted.", severity="error")
+            return
+
+        # Capture expansion state before opening the dialog
+        captured_expanded_node_ids = tree.get_expanded_node_ids()
 
         # Determine fallbacks: next sibling, else previous sibling, else parent,
         # else None (first visible root will be handled by refresh_tree).

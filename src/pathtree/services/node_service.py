@@ -391,11 +391,132 @@ class NodeService:
             valid = True
         elif kind == "resource" and res_type == "multi_launcher":
             valid = True
+        elif kind == "resource" and res_type == "reference":
+            valid = True
 
         if not valid:
             raise ValidationError(
                 f"Invalid combination: node_kind='{kind}', resource_type='{res_type}'."
             )
+
+    def get_custom_group(self, workspace_id: uuid.UUID) -> Node:
+        """Find the Custom system group under a workspace."""
+        from sqlmodel import select
+
+        statement = select(Node).where(
+            Node.parent_id == workspace_id,
+            Node.node_kind == "system_group",
+            Node.system_role == "custom",
+        )
+        group = self.repository.session.exec(statement).first()
+        if not group:
+            raise ValidationError(
+                f"Custom group not found for workspace {workspace_id}"
+            )
+        return group
+
+    def get_system_group(self, workspace_id: uuid.UUID) -> Node:
+        """Find the System system group under a workspace."""
+        from sqlmodel import select
+
+        statement = select(Node).where(
+            Node.parent_id == workspace_id,
+            Node.node_kind == "system_group",
+            Node.system_role == "system",
+        )
+        group = self.repository.session.exec(statement).first()
+        if not group:
+            raise ValidationError(
+                f"System group not found for workspace {workspace_id}"
+            )
+        return group
+
+    def get_system_subsection(
+        self, workspace_id: uuid.UUID, resource_type: str
+    ) -> Node:
+        """Find the System subsection for a given resource type under a workspace."""
+        type_to_system_role = {
+            "directory": "directories",
+            "file": "files",
+            "script": "scripts",
+            "executable": "executables",
+            "url": "urls",
+            "launch_profile": "launch_profiles",
+            "multi_launcher": "multi_launchers",
+        }
+        role = type_to_system_role.get(resource_type)
+        if not role:
+            raise ValidationError(
+                f"No system role mapped for resource type '{resource_type}'"
+            )
+
+        sys_group = self.get_system_group(workspace_id)
+
+        from sqlmodel import select
+
+        sub_stmt = select(Node).where(
+            Node.parent_id == sys_group.id,
+            Node.node_kind == "system_group",
+            Node.system_role == role,
+        )
+        subsection = self.repository.session.exec(sub_stmt).first()
+        if not subsection:
+            raise ValidationError(
+                f"System subsection for role '{role}' "
+                f"not found for workspace {workspace_id}"
+            )
+        return subsection
+
+    def _find_workspace_for_node(self, node_id: uuid.UUID) -> Node | None:
+        """Find the Workspace ancestor of a node."""
+        curr = self.repository.get_by_id(node_id)
+        while curr is not None:
+            if curr.node_kind == "workspace":
+                return curr
+            if curr.parent_id is None:
+                break
+            curr = self.repository.get_by_id(curr.parent_id)
+        return None
+
+    def resolve_workspace_context(self, node_id: uuid.UUID | None) -> uuid.UUID | None:
+        """Find the Workspace ancestor ID of any given node."""
+        if node_id is None:
+            return None
+        curr = self.repository.get_by_id(node_id)
+        while curr is not None:
+            if curr.node_kind == "workspace":
+                return curr.id
+            if curr.parent_id is None:
+                break
+            curr = self.repository.get_by_id(curr.parent_id)
+        return None
+
+    def _is_inside_system_area(self, node_id: uuid.UUID | None) -> bool:
+        """Check if a node ID is located inside the System area of any workspace."""
+        curr_id = node_id
+        visited = set()
+        while curr_id is not None:
+            if curr_id in visited:
+                break
+            visited.add(curr_id)
+            curr = self.repository.get_by_id(curr_id)
+            if curr is None:
+                break
+            if curr.node_kind == "system_group" and curr.system_role == "system":
+                return True
+            curr_id = curr.parent_id
+        return False
+
+    def _has_custom_group(self, workspace_id: uuid.UUID) -> bool:
+        """Check if a workspace has the Custom group layout."""
+        from sqlmodel import select
+
+        stmt = select(Node).where(
+            Node.parent_id == workspace_id,
+            Node.node_kind == "system_group",
+            Node.system_role == "custom",
+        )
+        return self.repository.session.exec(stmt).first() is not None
 
     def create_node(
         self,
@@ -410,6 +531,9 @@ class NodeService:
         is_temporary: bool = False,
         sort_order: int = 0,
         system_role: str | None = None,
+        auto_layout: bool = False,
+        auto_route: bool = False,
+        workspace_id: uuid.UUID | None = None,
     ) -> Node:
         """Create a new node after performing validations.
 
@@ -426,6 +550,55 @@ class NodeService:
         trimmed_name = name.strip()
         if not trimmed_name:
             raise EmptyNodeNameError("Name cannot be empty after trimming.")
+
+        # Determine target workspace and explicit destination
+        resolved_workspace = None
+        if parent_id is not None:
+            resolved_workspace = self._find_workspace_for_node(parent_id)
+
+        target_workspace_id = workspace_id or (
+            resolved_workspace.id if resolved_workspace else None
+        )
+
+        if target_workspace_id is not None:
+            # Check if this workspace has the system/custom layout
+            if self._has_custom_group(target_workspace_id):
+                if node_kind == "folder" or (
+                    node_kind == "resource" and resource_type == "reference"
+                ):
+                    # Folder and Reference routing
+                    if parent_id is not None:
+                        # Rejects when inside System
+                        if self._is_inside_system_area(parent_id):
+                            raise ValidationError(
+                                "Folders and references cannot "
+                                "be created inside the System area."
+                            )
+
+                        parent_workspace = self._find_workspace_for_node(parent_id)
+                        # selected parent belongs to another workspace: reject
+                        if (
+                            parent_workspace
+                            and parent_workspace.id != target_workspace_id
+                        ):
+                            raise ValidationError(
+                                "Selected parent belongs to another workspace."
+                            )
+
+                        # If selected parent is Workspace: route to Custom root
+                        parent_node = self.repository.get_by_id(parent_id)
+                        if parent_node and parent_node.node_kind == "workspace":
+                            parent_id = self.get_custom_group(target_workspace_id).id
+                    else:
+                        # Default to Custom root of target workspace
+                        parent_id = self.get_custom_group(target_workspace_id).id
+
+                elif node_kind == "resource" and resource_type != "reference":
+                    # Real resource routing
+                    res_type = resource_type or "directory"
+                    parent_id = self.get_system_subsection(
+                        target_workspace_id, res_type
+                    ).id
 
         # 2. Validate requested parent
         self.validate_parent(None, parent_id, node_kind=node_kind)
@@ -446,7 +619,8 @@ class NodeService:
             existing_sg = self.repository.session.exec(statement).first()
             if existing_sg:
                 raise ValidationError(
-                    f"A system group with role '{system_role}' already exists under this parent."
+                    f"A system group with role '{system_role}' "
+                    "already exists under this parent."
                 )
 
         # 3. Validate sibling-name uniqueness
@@ -518,7 +692,7 @@ class NodeService:
 
         self.validate_node(node)
         try:
-            return self.repository.create(node)
+            created_node = self.repository.create(node)
         except RepositoryIntegrityError as e:
             raise ValidationError(
                 f"Database persistence violated integrity: {clean_error_message(e)}"
@@ -527,6 +701,47 @@ class NodeService:
             raise ValidationError(
                 f"Database persistence failed: {clean_error_message(e)}"
             ) from e
+
+        # Workspace layout initialization immediately and atomically (Rule 5)
+        if node_kind == "workspace" and auto_layout:
+            try:
+                # Create System group
+                sys_group = self.create_node(
+                    name="System",
+                    node_kind="system_group",
+                    parent_id=created_node.id,
+                    system_role="system",
+                )
+                # Create Custom group
+                self.create_node(
+                    name="Custom",
+                    node_kind="system_group",
+                    parent_id=created_node.id,
+                    system_role="custom",
+                )
+                # Create the 7 subsections under System
+                subsections = [
+                    ("Directories", "directories"),
+                    ("Files", "files"),
+                    ("Scripts", "scripts"),
+                    ("Executables", "executables"),
+                    ("URLs", "urls"),
+                    ("Launch Profiles", "launch_profiles"),
+                    ("Multi Launchers", "multi_launchers"),
+                ]
+                for label, s_role in subsections:
+                    self.create_node(
+                        name=label,
+                        node_kind="system_group",
+                        parent_id=sys_group.id,
+                        system_role=s_role,
+                    )
+            except Exception as e:
+                # Rollback atomically: delete the workspace node recursively
+                self.repository.delete_recursive(created_node.id)
+                raise e
+
+        return created_node
 
     def update_node(self, node_id: uuid.UUID, **kwargs) -> Node:
         """Update an existing node after performing validations.
@@ -540,6 +755,9 @@ class NodeService:
         node = self.repository.get_by_id(node_id)
         if node is None:
             raise NodeNotFoundError(f"Node {node_id} does not exist.")
+
+        if node.node_kind == "system_group":
+            raise ValidationError("Managed system groups cannot be modified.")
 
         if "parent_id" in kwargs:
             raise ValidationError(
@@ -700,6 +918,48 @@ class NodeService:
         if node is None:
             raise NodeNotFoundError(f"Node {node_id} does not exist.")
 
+        if node.node_kind == "system_group":
+            raise ValidationError("Managed system groups cannot be moved.")
+
+        # Resolve routed destination parent based on target workspace rules
+        target_workspace = None
+        if new_parent_id is not None:
+            target_node = self.repository.get_by_id(new_parent_id)
+            if target_node:
+                if target_node.node_kind == "workspace":
+                    target_workspace = target_node
+                else:
+                    target_workspace = self._find_workspace_for_node(new_parent_id)
+
+        if target_workspace is not None and self._has_custom_group(target_workspace.id):
+            if node.node_kind == "folder" or (
+                node.node_kind == "resource" and node.resource_type == "reference"
+            ):
+                if new_parent_id is not None:
+                    if self._is_inside_system_area(new_parent_id):
+                        raise ValidationError(
+                            "Folders and references cannot "
+                            "be moved inside the System area."
+                        )
+
+                    parent_workspace = self._find_workspace_for_node(new_parent_id)
+                    if parent_workspace and parent_workspace.id != target_workspace.id:
+                        raise ValidationError(
+                            "Selected parent belongs to another workspace."
+                        )
+
+                    parent_node = self.repository.get_by_id(new_parent_id)
+                    if parent_node and parent_node.node_kind == "workspace":
+                        new_parent_id = self.get_custom_group(target_workspace.id).id
+                else:
+                    new_parent_id = self.get_custom_group(target_workspace.id).id
+
+            elif node.node_kind == "resource" and node.resource_type != "reference":
+                # Real resource routed destination
+                new_parent_id = self.get_system_subsection(
+                    target_workspace.id, node.resource_type
+                ).id
+
         # Safe no-op if moving to current parent
         if node.parent_id == new_parent_id:
             return node
@@ -759,8 +1019,14 @@ class NodeService:
         """Find or lazily create exactly one managed system group under a workspace."""
         from sqlmodel import select
 
+        # Resolve where this group should reside
+        if self._has_custom_group(workspace_id):
+            parent_id = self.get_system_group(workspace_id).id
+        else:
+            parent_id = workspace_id
+
         statement = select(Node).where(
-            Node.parent_id == workspace_id,
+            Node.parent_id == parent_id,
             Node.node_kind == "system_group",
             Node.system_role == system_role,
         )
@@ -771,7 +1037,7 @@ class NodeService:
         return self.create_node(
             name=default_name,
             node_kind="system_group",
-            parent_id=workspace_id,
+            parent_id=parent_id,
             system_role=system_role,
         )
 
@@ -784,6 +1050,9 @@ class NodeService:
         node = self.repository.get_by_id(node_id)
         if node is None:
             raise NodeNotFoundError(f"Node {node_id} does not exist.")
+
+        if node.node_kind == "system_group":
+            raise ValidationError("Managed system groups cannot be deleted.")
 
         from pathtree.database.repository import (
             LaunchProfileRepository,
@@ -939,6 +1208,96 @@ class NodeService:
 
         for root_tree_node in tree_nodes:
             traverse(root_tree_node, "Root")
+
+        return choices
+
+    def get_valid_parent_choices(
+        self,
+        node_kind: str,
+        resource_type: str | None = None,
+        exclude_node_id: uuid.UUID | None = None,
+        current_parent_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
+    ) -> list[tuple[str, uuid.UUID | None]]:
+        if node_kind == "workspace":
+            return [("Root", None)]
+
+        choices: list[tuple[str, uuid.UUID | None]] = []
+
+        # Find current node parent to be robust against Select value crash
+        current_node = None
+        if current_parent_id is not None:
+            current_node = self.repository.get_by_id(current_parent_id)
+
+        try:
+            tree_nodes = self.get_validated_tree()
+        except CycleError:
+            if current_node:
+                choices.append((f"Current: {current_node.name}", current_node.id))
+            return choices
+
+        def traverse(tree_node: TreeNode, parent_label: str) -> None:
+            node = tree_node.node
+            if exclude_node_id is not None and node.id == exclude_node_id:
+                return  # Skip self and all descendants
+
+            # If workspace_id is specified, filter by that workspace context
+            if workspace_id is not None:
+                # If node is a workspace node other than target workspace, skip it
+                if node.node_kind == "workspace" and node.id != workspace_id:
+                    return
+                # For non-workspace nodes, verify they descend from target workspace
+                if node.node_kind != "workspace":
+                    node_ws = self._find_workspace_for_node(node.id)
+                    if not node_ws or node_ws.id != workspace_id:
+                        return
+
+            # Construct label
+            if parent_label == "Root":
+                current_label = node.name
+            else:
+                current_label = f"{parent_label} / {node.name}"
+
+            # Check validity
+            is_valid = False
+            if node_kind == "folder":
+                if node.node_kind == "system_group" and node.system_role == "custom":
+                    is_valid = True
+                elif node.node_kind == "folder":
+                    if not self._is_inside_system_area(node.id):
+                        is_valid = True
+                elif node.node_kind == "workspace":
+                    if not self._has_custom_group(node.id):
+                        is_valid = True
+            elif resource_type in ("reference", "reference_copy"):
+                # For references: Custom root, Folder descendants of Custom,
+                # and Workspace nodes (for destination/cross-workspace selection)
+                if node.node_kind == "system_group" and node.system_role == "custom":
+                    is_valid = True
+                elif node.node_kind == "folder":
+                    if not self._is_inside_system_area(node.id):
+                        is_valid = True
+                elif node.node_kind == "workspace":
+                    is_valid = True
+            else:
+                # Real resources: only Workspace nodes are valid
+                if node.node_kind == "workspace":
+                    is_valid = True
+
+            if is_valid:
+                choices.append((current_label, node.id))
+
+            for child in tree_node.children:
+                traverse(child, current_label)
+
+        for root_tree_node in tree_nodes:
+            traverse(root_tree_node, "Root")
+
+        # Fallback to prevent Textual select crashes (Rule 7)
+        if current_node is not None:
+            exists = any(val_id == current_node.id for _, val_id in choices)
+            if not exists:
+                choices.insert(0, (f"Current: {current_node.name}", current_node.id))
 
         return choices
 

@@ -73,9 +73,9 @@ def init_db(engine: Engine) -> None:
         # Read version before any database mutation or table checks
         version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
 
-        if version > 5:
+        if version > 6:
             raise UnsupportedDatabaseVersionError(
-                f"Database version {version} is newer than the supported version 5."
+                f"Database version {version} is newer than the supported version 6."
             )
 
         # Check if 'nodes' table exists after version check
@@ -87,8 +87,8 @@ def init_db(engine: Engine) -> None:
         if not table_exists:
             # Create all tables defined in SQLModel metadata
             SQLModel.metadata.create_all(engine)
-            # Set user_version to 5
-            connection.execute(text("PRAGMA user_version = 5;"))
+            # Set user_version to 6
+            connection.execute(text("PRAGMA user_version = 6;"))
             session.commit()
             return
 
@@ -341,6 +341,254 @@ def init_db(engine: Engine) -> None:
                     f"Migration from version {version} to 5 failed. "
                     "All changes rolled back."
                 ) from e
+
+        if version == 5:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+
+                # Create resource_references table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS resource_references (
+                        id VARCHAR NOT NULL,
+                        reference_node_id VARCHAR NOT NULL,
+                        original_node_id VARCHAR,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(reference_node_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(original_node_id) REFERENCES nodes (id) ON DELETE SET NULL
+                    );
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_reference_node_id ON resource_references (reference_node_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_original_node_id ON resource_references (original_node_id);"
+                )
+
+                cursor.execute("PRAGMA user_version = 6;")
+                dbapi_conn.commit()
+                cursor.close()
+                version = 6
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Migration from version {version} to 6 failed. "
+                    "All changes rolled back."
+                ) from e
+
+        # Final Verification Check: Ensure 'resource_references' table exists on startup
+        cursor = connection.execute(
+            text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='resource_references';"
+            )
+        )
+        if cursor.first() is None:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS resource_references (
+                        id VARCHAR NOT NULL,
+                        reference_node_id VARCHAR NOT NULL,
+                        original_node_id VARCHAR,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(reference_node_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        FOREIGN KEY(original_node_id) REFERENCES nodes (id) ON DELETE SET NULL
+                    );
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_reference_node_id ON resource_references (reference_node_id);"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_resource_references_original_node_id ON resource_references (original_node_id);"
+                )
+                cursor.execute("PRAGMA user_version = 6;")
+                dbapi_conn.commit()
+                cursor.close()
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Startup verification and creation of resource_references failed: {e}"
+                ) from e
+
+        # Relocate legacy workspaces and their children deterministically
+        migrate_existing_workspaces(connection)
+        session.commit()
+
+
+def migrate_existing_workspaces(connection) -> None:
+    """Migrate all legacy workspaces and their children to the new System/Custom layout."""
+    import uuid
+
+    # 1. Fetch all nodes from nodes table
+    cursor = connection.execute(
+        text(
+            "SELECT id, parent_id, name, node_kind, resource_type, system_role FROM nodes;"
+        )
+    )
+    all_nodes = []
+    for row in cursor.all():
+        row_dict = dict(row._mapping)
+        # Normalize IDs to hex without hyphens to match SQLModel storage format
+        if row_dict["id"]:
+            row_dict["id"] = row_dict["id"].replace("-", "")
+        if row_dict["parent_id"]:
+            row_dict["parent_id"] = row_dict["parent_id"].replace("-", "")
+        all_nodes.append(row_dict)
+
+    nodes_by_id = {n["id"]: n for n in all_nodes}
+
+    workspaces = [n for n in all_nodes if n["node_kind"] == "workspace"]
+    if not workspaces:
+        return
+
+    # Helper to find workspace ID for any node in the database
+    def find_workspace_id(node_id: str) -> str | None:
+        curr_id = node_id.replace("-", "")
+        visited = set()
+        while curr_id is not None:
+            if curr_id in visited:
+                break
+            visited.add(curr_id)
+            node = nodes_by_id.get(curr_id)
+            if not node:
+                break
+            if node["node_kind"] == "workspace":
+                return curr_id
+            curr_id = node["parent_id"]
+            if curr_id:
+                curr_id = curr_id.replace("-", "")
+        return None
+
+    # Helper to create a node in SQL
+    def db_create_node(
+        name: str, node_kind: str, parent_id: str | None, system_role: str | None = None
+    ) -> str:
+        nid = uuid.uuid4().hex
+        pid = parent_id.replace("-", "") if parent_id else None
+        connection.execute(
+            text(
+                "INSERT INTO nodes (id, name, node_kind, parent_id, system_role, is_favorite, is_temporary, sort_order, created_at, updated_at, node_type) "
+                "VALUES (:id, :name, :node_kind, :parent_id, :system_role, 0, 0, 0, datetime('now'), datetime('now'), 'Folder');"
+            ),
+            {
+                "id": nid,
+                "name": name,
+                "node_kind": node_kind,
+                "parent_id": pid,
+                "system_role": system_role,
+            },
+        )
+        new_node = {
+            "id": nid,
+            "parent_id": pid,
+            "name": name,
+            "node_kind": node_kind,
+            "resource_type": None,
+            "system_role": system_role,
+        }
+        nodes_by_id[nid] = new_node
+        return nid
+
+    # For each workspace, ensure System and Custom groups exist, and System has its 7 subsections
+    workspace_layouts = {}
+    for ws in workspaces:
+        ws_id = ws["id"]
+        sys_group_id = None
+        custom_group_id = None
+        for n in all_nodes:
+            if n["parent_id"] == ws_id and n["node_kind"] == "system_group":
+                if n["system_role"] == "system":
+                    sys_group_id = n["id"]
+                elif n["system_role"] == "custom":
+                    custom_group_id = n["id"]
+
+        if not sys_group_id:
+            sys_group_id = db_create_node("System", "system_group", ws_id, "system")
+        if not custom_group_id:
+            custom_group_id = db_create_node("Custom", "system_group", ws_id, "custom")
+
+        # Ensure System has the 7 subsections
+        subsections = {
+            "directories": "Directories",
+            "files": "Files",
+            "scripts": "Scripts",
+            "executables": "Executables",
+            "urls": "URLs",
+            "launch_profiles": "Launch Profiles",
+            "multi_launchers": "Multi Launchers",
+        }
+        subsection_ids = {}
+        for role, name in subsections.items():
+            sub_id = None
+            for n in all_nodes:
+                if (
+                    n["parent_id"] == sys_group_id
+                    and n["node_kind"] == "system_group"
+                    and n["system_role"] == role
+                ):
+                    sub_id = n["id"]
+            if not sub_id:
+                sub_id = db_create_node(name, "system_group", sys_group_id, role)
+            subsection_ids[role] = sub_id
+
+        workspace_layouts[ws_id] = {
+            "system": sys_group_id,
+            "custom": custom_group_id,
+            "subsections": subsection_ids,
+        }
+
+    # Now, relocate children of workspaces and subtrees
+    for n in all_nodes:
+        nid = n["id"]
+        # Skip workspace nodes and the System/Custom layout nodes themselves
+        if n["node_kind"] in ("workspace", "system_group"):
+            continue
+
+        ws_id = find_workspace_id(nid)
+        if not ws_id:
+            continue
+
+        layout = workspace_layouts[ws_id]
+
+        if n["node_kind"] == "folder":
+            # If folder's parent is directly the workspace, move it to Custom
+            if n["parent_id"] == ws_id:
+                connection.execute(
+                    text("UPDATE nodes SET parent_id = :parent_id WHERE id = :id;"),
+                    {"parent_id": layout["custom"], "id": nid},
+                )
+        elif n["node_kind"] == "resource":
+            res_type = n["resource_type"] or "directory"
+            role_map = {
+                "directory": "directories",
+                "file": "files",
+                "script": "scripts",
+                "executable": "executables",
+                "url": "urls",
+                "launch_profile": "launch_profiles",
+                "multi_launcher": "multi_launchers",
+            }
+            role = role_map.get(res_type, "directories")
+            target_parent = layout["subsections"][role]
+
+            if n["parent_id"] != target_parent:
+                connection.execute(
+                    text("UPDATE nodes SET parent_id = :parent_id WHERE id = :id;"),
+                    {"parent_id": target_parent, "id": nid},
+                )
 
 
 _engine: Engine | None = None

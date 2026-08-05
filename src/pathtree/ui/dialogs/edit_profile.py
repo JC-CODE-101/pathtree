@@ -14,7 +14,7 @@ from pathtree.services.node_service import NodeService
 from pathtree.ui.compat import resolve_optional_uuid
 
 
-class EditProfileDialog(ModalScreen[bool]):
+class EditProfileDialog(ModalScreen[uuid.UUID | None]):
     """Dialog for creating or editing a Launch Profile."""
 
     CSS = """
@@ -176,7 +176,7 @@ class EditProfileDialog(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-cancel":
-            self.dismiss(False)
+            self.dismiss(None)
         elif event.button.id == "btn-save":
             self.action_submit()
 
@@ -215,19 +215,20 @@ class EditProfileDialog(ModalScreen[bool]):
                     clear_working_directory=(wd_id is None),
                     terminal_mode=terminal_mode,
                 )
+                self.dismiss(self.profile.profile_node_id)
             else:
                 # Create
                 if not self.target_node_id:
                     status_area.update("Missing target node ID.")
                     return
-                self.launch_profile_service.create_profile(
+                profile = self.launch_profile_service.create_profile(
                     name=name,
                     target_node_id=self.target_node_id,
                     arguments=arguments,
                     working_directory_node_id=wd_id,
                     terminal_mode=terminal_mode,
                 )
-            self.dismiss(True)
+                self.dismiss(profile.profile_node_id)
         except LaunchProfileServiceError as e:
             status_area.update(str(e))
 
@@ -235,7 +236,7 @@ class EditProfileDialog(ModalScreen[bool]):
         if event.key == "escape":
             event.prevent_default()
             event.stop()
-            self.dismiss(False)
+            self.dismiss(None)
         elif event.key == "enter":
             focused = self.screen.focused
             submit_ids = {

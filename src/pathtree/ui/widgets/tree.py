@@ -113,6 +113,17 @@ class NodeTreeView(Tree[uuid.UUID]):
         self.node_service = node_service
         self.show_root = False
         self.load_error: str | None = None
+
+        from pathtree.database.repository import ResourceReferenceRepository
+        from pathtree.services.resource_reference_service import (
+            ResourceReferenceService,
+        )
+
+        self.reference_service = ResourceReferenceService(
+            self.node_service,
+            ResourceReferenceRepository(self.node_service.repository.session),
+        )
+
         self.populate_tree()
 
     @property
@@ -292,13 +303,23 @@ class NodeTreeView(Tree[uuid.UUID]):
             # Resolve icon
             from pathtree.utils.icons import icon_registry
 
-            icon = icon_registry.get_icon(db_node)
+            if db_node.node_kind == "resource" and db_node.resource_type == "reference":
+                if self.reference_service.is_broken(db_node.id):
+                    icon = "↗ ⚠"
+                    label_name = f"{db_node.name} [Broken]"
+                else:
+                    orig_node = self.reference_service.get_original_node(db_node.id)
+                    icon = f"↗ {icon_registry.get_icon(orig_node)}"
+                    label_name = db_node.name
+            else:
+                icon = icon_registry.get_icon(db_node)
+                label_name = db_node.name
 
             # Prepend pin marker if the node is globally pinned
             if db_node.id in pinned_node_ids:
                 icon = f"{icon_registry.get_pin_marker()} {icon}"
 
-            label = IconText(db_node.name, icon)
+            label = IconText(label_name, icon)
 
             if children:
                 # Set expand to expand_all or if in expanded_node_ids

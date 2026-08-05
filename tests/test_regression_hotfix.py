@@ -274,10 +274,11 @@ async def test_enter_leakage_regressions(session: Session, tmp_path: Path) -> No
         # 4. Move submission with enter key does not activate
         # Move "New Folder Renamed" to "New WS"
         new_ws = next(n for n in node_service.load_root_nodes() if n.name == "New WS")
+        new_ws_custom = node_service.get_custom_group(new_ws.id)
         await pilot.press("m")
         assert isinstance(app.screen, MoveNodeDialog)
         dialog = app.screen
-        dialog.query_one("#select-parent").value = new_ws.id
+        dialog.query_one("#select-parent").value = new_ws_custom.id
         dialog.query_one("#btn-move").focus()
         await pilot.press("enter")
         await pilot.pause(0.05)
@@ -427,3 +428,173 @@ async def test_details_synchronization_regressions(
         assert tree.cursor_node is not None
         fallback_name = str(tree.cursor_node.label)
         assert fallback_name in details.render().plain
+
+
+@pytest.mark.asyncio
+async def test_three_workspaces_creation_focus_regression(session: Session) -> None:
+    """TUI regression tests with three workspaces to verify cursor/focus stability.
+
+    - creates Workspace A, B, and C with auto_layout
+    - expands Workspace C
+    - creates a Launch Profile, Multi Launcher, Script, Directory, Folder
+    - asserts Workspace C stays expanded
+    - asserts newly created nodes are selected and cursor points to them
+    - asserts the tree has focus
+    - asserts cursor did not jump to Workspace A
+    """
+    repo = NodeRepository(session)
+    node_service = NodeService(repo)
+
+    # 1. Create Workspace A, B, and C
+    ws_a = node_service.create_node(
+        name="Workspace A", node_kind="workspace", auto_layout=True
+    )
+    _ws_b = node_service.create_node(
+        name="Workspace B", node_kind="workspace", auto_layout=True
+    )
+    ws_c = node_service.create_node(
+        name="Workspace C", node_kind="workspace", auto_layout=True
+    )
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view")
+
+        # First, let's navigate to Workspace C and expand it
+        ws_c_tn = next(c for c in tree.root.children if c.data == ws_c.id)
+        tree.move_cursor(ws_c_tn)
+        await pilot.press("l")  # Expand Workspace C
+        await pilot.pause(0.01)
+        assert ws_c_tn.is_expanded is True
+
+        # Now, select Workspace C / System / Scripts to expand it
+        sys_c = node_service.get_system_group(ws_c.id)
+        scripts_c = node_service.get_system_subsection(ws_c.id, "script")
+
+        # Let's expand System and then Scripts
+        sys_c_tn = next(c for c in ws_c_tn.children if c.data == sys_c.id)
+        tree.move_cursor(sys_c_tn)
+        await pilot.press("l")  # Expand System
+        await pilot.pause(0.01)
+
+        scripts_c_tn = next(c for c in sys_c_tn.children if c.data == scripts_c.id)
+        tree.move_cursor(scripts_c_tn)
+        await pilot.pause(0.01)
+
+        # --------------------------------------------------
+        # A. Create a Script resource under Workspace C / System / Scripts
+        # --------------------------------------------------
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+        await pilot.click("#radio-script")
+        await pilot.pause(0.01)
+        dialog.query_one("#input-name").value = "MyScript"
+        dialog.query_one("#input-path").value = __file__
+        dialog.action_submit()
+        await pilot.pause(0.05)
+
+        # Assert correct focus & select
+        assert app.screen.id == "main-screen"
+        assert tree.has_focus is True
+        assert tree.cursor_node is not None
+        assert str(tree.cursor_node.label) == "MyScript"
+        assert tree.cursor_node.data is not None
+        my_script_id = tree.cursor_node.data
+        assert node_service.get_node(my_script_id).parent_id == scripts_c.id
+        assert tree.cursor_node.data != ws_a.id
+
+        # --------------------------------------------------
+        # B. Create a Launch Profile resource
+        # --------------------------------------------------
+        # With cursor on MyScript, open Actions Menu -> Create Launch Profile
+        await pilot.press("o")
+        await pilot.pause(0.01)
+        await pilot.press("down")  # Down to Edit Script
+        await pilot.press("down")  # Down to Create Launch Profile
+        await pilot.press("enter")
+        await pilot.pause(0.01)
+
+        from pathtree.ui.dialogs.edit_profile import EditProfileDialog
+
+        assert isinstance(app.screen, EditProfileDialog)
+        ep_dialog = app.screen
+        ep_dialog.query_one("#input-name").value = "MyProfile"
+        ep_dialog.action_submit()
+        await pilot.pause(0.05)
+
+        # Assert correct focus & select
+        assert app.screen.id == "main-screen"
+        assert tree.has_focus is True
+        assert tree.cursor_node is not None
+        assert str(tree.cursor_node.label) == "MyProfile"
+        my_profile_id = tree.cursor_node.data
+        assert node_service.get_node(my_profile_id).resource_type == "launch_profile"
+        assert tree.cursor_node.data != ws_a.id
+
+        # --------------------------------------------------
+        # C. Create a Multi Launcher resource
+        # --------------------------------------------------
+        # Multi Launcher is created via Add Node Dialog
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+        await pilot.click("#radio-multi-launcher")
+        await pilot.pause(0.01)
+        dialog.query_one("#input-name").value = "MyLauncher"
+        dialog.action_submit()
+        await pilot.pause(0.05)
+
+        # Assert correct focus & select
+        assert app.screen.id == "main-screen"
+        assert tree.has_focus is True
+        assert tree.cursor_node is not None
+        assert str(tree.cursor_node.label) == "MyLauncher"
+        my_launcher_id = tree.cursor_node.data
+        assert node_service.get_node(my_launcher_id).resource_type == "multi_launcher"
+        assert tree.cursor_node.data != ws_a.id
+
+        # --------------------------------------------------
+        # D. Create a Directory resource
+        # --------------------------------------------------
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+        await pilot.click("#radio-directory")
+        await pilot.pause(0.01)
+        dialog.query_one("#input-name").value = "MyDir"
+        dialog.action_submit()
+        await pilot.pause(0.05)
+
+        # Assert correct focus & select
+        assert app.screen.id == "main-screen"
+        assert tree.has_focus is True
+        assert tree.cursor_node is not None
+        assert str(tree.cursor_node.label) == "MyDir"
+        my_dir_id = tree.cursor_node.data
+        assert node_service.get_node(my_dir_id).resource_type == "directory"
+        assert tree.cursor_node.data != ws_a.id
+
+        # --------------------------------------------------
+        # E. Create a Custom Folder
+        # --------------------------------------------------
+        await pilot.press("a")
+        assert isinstance(app.screen, AddNodeDialog)
+        dialog = app.screen
+        await pilot.click("#radio-folder")
+        await pilot.pause(0.01)
+        dialog.query_one("#input-name").value = "MyFolder"
+        dialog.action_submit()
+        await pilot.pause(0.05)
+
+        # Assert correct focus & select
+        assert app.screen.id == "main-screen"
+        assert tree.has_focus is True
+        assert tree.cursor_node is not None
+        assert str(tree.cursor_node.label) == "MyFolder"
+        my_folder_id = tree.cursor_node.data
+        assert node_service.get_node(my_folder_id).node_kind == "folder"
+        assert tree.cursor_node.data != ws_a.id
