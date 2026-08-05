@@ -104,9 +104,14 @@ class LaunchProfileService:
 
         # 3. Find or create the "Launch Profiles" system group section lazily
         try:
-            launch_profiles_group = self.node_service.get_or_create_system_group(
-                workspace.id, "launch_profiles", "Launch Profiles"
-            )
+            if self.node_service._has_custom_group(workspace.id):
+                launch_profiles_group = self.node_service.get_system_subsection(
+                    workspace.id, "launch_profile"
+                )
+            else:
+                launch_profiles_group = self.node_service.get_or_create_system_group(
+                    workspace.id, "launch_profiles", "Launch Profiles"
+                )
         except ValidationError as e:
             raise DuplicateManagedGroupError(str(e)) from e
 
@@ -217,9 +222,14 @@ class LaunchProfileService:
 
             # Automatically move profile tree node back under Launch Profiles
             try:
-                launch_group = self.node_service.get_or_create_system_group(
-                    profile.workspace_id, "launch_profiles", "Launch Profiles"
-                )
+                if self.node_service._has_custom_group(profile.workspace_id):
+                    launch_group = self.node_service.get_system_subsection(
+                        profile.workspace_id, "launch_profile"
+                    )
+                else:
+                    launch_group = self.node_service.get_or_create_system_group(
+                        profile.workspace_id, "launch_profiles", "Launch Profiles"
+                    )
                 self.node_service.move_node(profile.profile_node_id, launch_group.id)
             except Exception:
                 pass

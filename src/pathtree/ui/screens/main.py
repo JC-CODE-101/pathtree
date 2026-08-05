@@ -180,7 +180,7 @@ class MainScreen(Screen[None]):
 
     @property
     def reference_service(self):
-        """Lazily initialize the reference service to protect against mocked dependencies in tests."""
+        """Lazily initialize the reference service to protect against mocks."""
         if not hasattr(self, "_reference_service_lazy"):
             from pathtree.database.repository import ResourceReferenceRepository
             from pathtree.services.resource_reference_service import (
@@ -282,7 +282,7 @@ class MainScreen(Screen[None]):
             self._last_selected_node_id = None
             return
 
-        # AVOID duplicate updates if selection hasn't actually changed (avoids hover/mouse lag)
+        # AVOID duplicate updates if selection hasn't changed (avoids mouse lag)
         if not force_update and cursor_node.data == self._last_selected_node_id:
             return
 
@@ -337,6 +337,15 @@ class MainScreen(Screen[None]):
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[uuid.UUID]) -> None:
         """Update the details panel whenever the highlighted node changes."""
+        try:
+            tree = self.query_one("#tree-view", NodeTreeView)
+            if (
+                tree.cursor_node is not None
+                and tree.cursor_node.data != event.node.data
+            ):
+                return
+        except Exception:
+            pass
         self._update_details_and_selection()
 
     def on_node_tree_view_activate_node(self, event: NodeTreeView.ActivateNode) -> None:
@@ -393,7 +402,7 @@ class MainScreen(Screen[None]):
                 )
                 actions.extend(provider.get_available_actions(context))
 
-            # Dynamically inject Create Reference for any real resource (not reference itself)
+            # Dynamically inject Create Reference for any real resource
             if node.resource_type != "reference":
                 from pathtree.actions.base import ResourceAction
 
@@ -401,7 +410,10 @@ class MainScreen(Screen[None]):
                     ResourceAction(
                         id="create_reference",
                         label="Create Reference",
-                        description="Create a reference to this resource in another workspace or folder",
+                        description=(
+                            "Create a reference to this resource in another "
+                            "workspace or folder"
+                        ),
                     )
                 )
 
