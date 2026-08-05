@@ -22,6 +22,28 @@ def get_originating_workspace(node_service: NodeService, node) -> str:
 
 def main() -> None:
     """CLI entry point for PathTree."""
+
+    if len(sys.argv) > 1 and sys.argv[1] == "config":
+        if len(sys.argv) >= 5 and sys.argv[2] == "set" and sys.argv[3] == "icons":
+            mode = sys.argv[4].lower()
+            if mode not in ("nerd", "unicode", "ascii", "auto"):
+                print(
+                    "Error: Invalid icon mode. Choose from nerd, unicode, ascii, auto.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            from pathtree.config.manager import config_manager
+
+            config_manager.set_icon_mode(mode)
+            print(f"Icon mode set to '{mode}'.")
+            sys.exit(0)
+        else:
+            print(
+                "Usage: pathtree config set icons [nerd|unicode|ascii|auto]",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     parser = argparse.ArgumentParser(
         description="PathTree: Modern terminal workspace and path manager."
     )
@@ -131,8 +153,70 @@ def main() -> None:
         action="store_true",
         help="Override the profile execution to run in a new terminal window.",
     )
+    parser.add_argument(
+        "--icon-preview",
+        action="store_true",
+        help="Show a preview of every semantic icon in the active mode.",
+    )
 
     args = parser.parse_args()
+
+    if args.icon_preview:
+        from pathtree.utils.icons import icon_registry
+
+        mode = icon_registry.get_icon_mode()
+        print(f"Active Icon Mode: {mode}\n")
+
+        preview_items = [
+            ("Workspace", "workspace", None, None),
+            ("System", "system_group", None, "system"),
+            ("Custom", "system_group", None, "custom"),
+            ("Directories group", "system_group", None, "directories"),
+            ("Files group", "system_group", None, "files"),
+            ("Scripts group", "system_group", None, "scripts"),
+            ("Executables group", "system_group", None, "executables"),
+            ("URLs group", "system_group", None, "urls"),
+            ("Launch Profiles group", "system_group", None, "launch_profiles"),
+            ("Multi Launchers group", "system_group", None, "multi_launchers"),
+            ("Folder", "folder", None, None),
+            ("Directory", "resource", "directory", None),
+            ("File", "resource", "file", None),
+            ("Script", "resource", "script", None),
+            ("Executable", "resource", "executable", None),
+            ("URL", "resource", "url", None),
+            ("Launch Profile", "resource", "launch_profile", None),
+            ("Multi Launcher", "resource", "multi_launcher", None),
+            ("Reference", "resource", "reference", None),
+            ("Broken Reference", "resource", "reference", None, True),
+        ]
+
+        for item in preview_items:
+            label = item[0]
+            kind = item[1]
+            res_type = item[2]
+            role = item[3]
+            is_broken = len(item) > 4 and item[4]
+
+            icon = icon_registry.resolve(
+                node_kind=kind,
+                resource_type=res_type,
+                system_role=role,
+                is_reference=(res_type == "reference"),
+                is_broken=is_broken,
+            )
+
+            if res_type == "reference":
+                if is_broken:
+                    print(f"{icon} {label}")
+                else:
+                    orig_icon = icon_registry.resolve("resource", "launch_profile")
+                    print(
+                        f"{orig_icon} Launch Profile {icon} (Reference to Launch Profile)"
+                    )
+            else:
+                print(f"{icon} {label}")
+
+        sys.exit(0)
 
     # Reject overrides when --profile is not supplied
     if (args.here or args.new_terminal) and args.profile is None:
