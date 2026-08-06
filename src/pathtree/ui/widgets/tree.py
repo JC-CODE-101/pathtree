@@ -508,6 +508,7 @@ class NodeTreeView(Tree[uuid.UUID]):
                 curr.expand()
                 curr = curr.parent
             self.call_after_refresh(self.move_cursor, target_node)
+            self.call_after_refresh(self.scroll_to_node, target_node)
         elif not self.show_root and self.root.children:
             self.call_after_refresh(self.move_cursor, self.root.children[0])
 

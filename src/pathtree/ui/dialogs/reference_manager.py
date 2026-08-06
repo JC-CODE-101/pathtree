@@ -10,7 +10,7 @@ from pathtree.services.node_service import NodeService, ValidationError
 from pathtree.services.resource_reference_service import ResourceReferenceService
 
 
-class ReferenceManagerDialog(ModalScreen[bool]):
+class ReferenceManagerDialog(ModalScreen[uuid.UUID | None]):
     """Unified Dialog for managing Resource References (create, copy, move, reconnect)."""
 
     CSS = """
@@ -219,7 +219,7 @@ class ReferenceManagerDialog(ModalScreen[bool]):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn-cancel":
-            self.dismiss(False)
+            self.dismiss(None)
         elif event.button.id == "btn-submit":
             self.action_submit()
 
@@ -237,7 +237,7 @@ class ReferenceManagerDialog(ModalScreen[bool]):
                     self.reference_node_id, original_val
                 )
                 self.app.notify("Reference reconnected successfully.")
-                self.dismiss(True)
+                self.dismiss(self.reference_node_id)
             except Exception as e:
                 status_area.update(str(e))
 
@@ -254,13 +254,13 @@ class ReferenceManagerDialog(ModalScreen[bool]):
 
             if self.mode == "create":
                 try:
-                    self.ref_service.create_reference(
+                    ref = self.ref_service.create_reference(
                         original_node_id=self.original_node_id,
                         destination_parent_id=folder_val,
                         custom_name=name_val,
                     )
                     self.app.notify(f"Created reference '{name_val}'")
-                    self.dismiss(True)
+                    self.dismiss(ref.reference_node_id)
                 except Exception as e:
                     status_area.update(str(e))
 
@@ -272,13 +272,13 @@ class ReferenceManagerDialog(ModalScreen[bool]):
                     if not ref_rec:
                         raise ValidationError("Reference record not found.")
 
-                    self.ref_service.create_reference(
+                    ref = self.ref_service.create_reference(
                         original_node_id=ref_rec.original_node_id,
                         destination_parent_id=folder_val,
                         custom_name=name_val,
                     )
                     self.app.notify(f"Copied reference '{name_val}' successfully.")
-                    self.dismiss(True)
+                    self.dismiss(ref.reference_node_id)
                 except Exception as e:
                     status_area.update(str(e))
 
@@ -289,7 +289,7 @@ class ReferenceManagerDialog(ModalScreen[bool]):
                     # Update reference name
                     self.node_service.update_node(self.reference_node_id, name=name_val)
                     self.app.notify(f"Moved reference '{name_val}' successfully.")
-                    self.dismiss(True)
+                    self.dismiss(self.reference_node_id)
                 except Exception as e:
                     status_area.update(str(e))
 
@@ -297,7 +297,7 @@ class ReferenceManagerDialog(ModalScreen[bool]):
         if event.key == "escape":
             event.prevent_default()
             event.stop()
-            self.dismiss(False)
+            self.dismiss(None)
         elif event.key == "enter":
             focused = self.screen.focused
             if focused and focused.id in (
@@ -313,6 +313,6 @@ class ReferenceManagerDialog(ModalScreen[bool]):
             elif focused and focused.id == "btn-cancel":
                 event.prevent_default()
                 event.stop()
-                self.dismiss(False)
+                self.dismiss(None)
             else:
                 event.stop()
