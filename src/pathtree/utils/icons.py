@@ -62,6 +62,7 @@ ICONS_BY_MODE = {
         "reference": "󰌷",
         "broken_reference": "󰅚",
         "pin": "󰐃",
+        "filter": "󰺰",
         "generic_fallback": "󰈔",
     },
     "unicode": {
@@ -87,6 +88,7 @@ ICONS_BY_MODE = {
         "reference": "↗",
         "broken_reference": "⚠",
         "pin": "📌",
+        "filter": "◉",
         "generic_fallback": "▪",
     },
     "ascii": {
@@ -112,6 +114,7 @@ ICONS_BY_MODE = {
         "reference": "->",
         "broken_reference": "[BROKEN]",
         "pin": "[PIN]",
+        "filter": "[FILTER]",
         "generic_fallback": "[FILE]",
     },
 }
@@ -592,6 +595,11 @@ class IconRegistry:
         """Get the pin marker symbol based on active icon mode."""
         mode = self.get_icon_mode()
         return ICONS_BY_MODE.get(mode, ICONS_BY_MODE["unicode"]).get("pin")
+
+    def get_filter_marker(self) -> str:
+        """Get the filter marker symbol based on active icon mode."""
+        mode = self.get_icon_mode()
+        return ICONS_BY_MODE.get(mode, ICONS_BY_MODE["unicode"]).get("filter")
 
 
 icon_registry = IconRegistry()

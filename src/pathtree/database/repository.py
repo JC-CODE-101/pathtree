@@ -10,6 +10,7 @@ from pathtree.models.multi_launcher import MultiLauncher, MultiLauncherItem
 from pathtree.models.node import Node
 from pathtree.models.pin import Pin
 from pathtree.models.resource_reference import ResourceReference
+from pathtree.models.workspace_view_settings import WorkspaceViewSettings
 
 
 class RepositoryCycleError(Exception):
@@ -645,4 +646,85 @@ class ResourceReferenceRepository:
             except SQLAlchemyError as e:
                 self.session.rollback()
                 raise RepositoryError(f"Database deletion failed: {e}") from e
+        return False
+
+
+class WorkspaceViewSettingsRepository:
+    """Repository for managing WorkspaceViewSettings persistence."""
+
+    def __init__(self, session: Session) -> None:
+        """Initialize the repository with a database session."""
+        self.session = session
+
+    def create(self, settings: WorkspaceViewSettings) -> WorkspaceViewSettings:
+        """Create a new WorkspaceViewSettings in the database."""
+        try:
+            self.session.add(settings)
+            self.session.commit()
+            self.session.refresh(settings)
+            return settings
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database persistence violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database persistence failed: {e}") from e
+
+    def get_by_id(self, id: uuid.UUID) -> WorkspaceViewSettings | None:
+        """Retrieve a WorkspaceViewSettings by its UUID."""
+        return self.session.get(WorkspaceViewSettings, id)
+
+    def get_by_workspace_id(
+        self, workspace_id: uuid.UUID
+    ) -> WorkspaceViewSettings | None:
+        """Retrieve a WorkspaceViewSettings by Workspace UUID."""
+        statement = select(WorkspaceViewSettings).where(
+            WorkspaceViewSettings.workspace_id == workspace_id
+        )
+        return self.session.exec(statement).first()
+
+    def update(self, settings: WorkspaceViewSettings) -> WorkspaceViewSettings:
+        """Update an existing WorkspaceViewSettings in the database."""
+        from datetime import UTC, datetime
+
+        settings.updated_at = datetime.now(UTC)
+        try:
+            self.session.add(settings)
+            self.session.commit()
+            self.session.refresh(settings)
+            return settings
+        except IntegrityError as e:
+            self.session.rollback()
+            raise RepositoryIntegrityError(
+                f"Database update violated integrity: {e}"
+            ) from e
+        except SQLAlchemyError as e:
+            self.session.rollback()
+            raise RepositoryError(f"Database update failed: {e}") from e
+
+    def delete(self, id: uuid.UUID) -> bool:
+        """Delete a WorkspaceViewSettings by its UUID."""
+        settings = self.get_by_id(id)
+        if settings:
+            try:
+                self.session.delete(settings)
+                self.session.commit()
+                return True
+            except IntegrityError as e:
+                self.session.rollback()
+                raise RepositoryIntegrityError(
+                    f"Database deletion violated integrity: {e}"
+                ) from e
+            except SQLAlchemyError as e:
+                self.session.rollback()
+                raise RepositoryError(f"Database deletion failed: {e}") from e
+        return False
+
+    def delete_by_workspace_id(self, workspace_id: uuid.UUID) -> bool:
+        """Delete a WorkspaceViewSettings associated with a Workspace UUID."""
+        settings = self.get_by_workspace_id(workspace_id)
+        if settings:
+            return self.delete(settings.id)
         return False

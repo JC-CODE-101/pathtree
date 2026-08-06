@@ -15,6 +15,7 @@ from pathtree.models.multi_launcher import (  # noqa: F401
 # Ensure models are imported so they register on SQLModel.metadata
 from pathtree.models.node import Node  # noqa: F401
 from pathtree.models.pin import Pin  # noqa: F401
+from pathtree.models.workspace_view_settings import WorkspaceViewSettings  # noqa: F401
 
 
 class UnsupportedDatabaseVersionError(Exception):
@@ -55,17 +56,19 @@ def create_db_engine(db_path: Path) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Query user_version, generate tables if needed, and migrate to version 5.
+    """Query user_version, generate tables if needed, and migrate to version 7.
 
-    If the database reports user_version > 5, we refuse startup with
+    If the database reports user_version > 7, we refuse startup with
     UnsupportedDatabaseVersionError.
-    Fresh database creates tables directly at version 5.
+    Fresh database creates tables directly at version 7.
     An existing version 1 (or 0) database is migrated transactionally to
-    version 2, then to 3, to 4, and then to 5.
-    An existing version 2 database is migrated to 3, 4, and then to 5.
-    An existing version 3 database is migrated to 4 and then to 5.
-    An existing version 4 database is migrated to 5.
-    Version 5 database no-ops cleanly.
+    version 2, then to 3, to 4, to 5, to 6, and then to 7.
+    An existing version 2 database is migrated to 3, 4, 5, 6, and then to 7.
+    An existing version 3 database is migrated to 4, 5, 6, and then to 7.
+    An existing version 4 database is migrated to 5, 6, and then to 7.
+    An existing version 5 database is migrated to 6 and then to 7.
+    An existing version 6 database is migrated to 7.
+    Version 7 database no-ops cleanly.
     """
     with Session(engine) as session:
         connection = session.connection()
@@ -73,9 +76,9 @@ def init_db(engine: Engine) -> None:
         # Read version before any database mutation or table checks
         version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
 
-        if version > 6:
+        if version > 7:
             raise UnsupportedDatabaseVersionError(
-                f"Database version {version} is newer than the supported version 6."
+                f"Database version {version} is newer than the supported version 7."
             )
 
         # Check if 'nodes' table exists after version check
@@ -87,8 +90,8 @@ def init_db(engine: Engine) -> None:
         if not table_exists:
             # Create all tables defined in SQLModel metadata
             SQLModel.metadata.create_all(engine)
-            # Set user_version to 6
-            connection.execute(text("PRAGMA user_version = 6;"))
+            # Set user_version to 7
+            connection.execute(text("PRAGMA user_version = 7;"))
             session.commit()
             return
 
@@ -382,6 +385,47 @@ def init_db(engine: Engine) -> None:
                     "All changes rolled back."
                 ) from e
 
+        if version == 6:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+
+                # Create workspace_view_settings table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS workspace_view_settings (
+                        id VARCHAR NOT NULL,
+                        workspace_id VARCHAR NOT NULL,
+                        current_mode VARCHAR NOT NULL,
+                        last_filter_mask INTEGER NOT NULL,
+                        hide_empty_sections BOOLEAN NOT NULL,
+                        show_system BOOLEAN NOT NULL,
+                        show_custom BOOLEAN NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(workspace_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        UNIQUE(workspace_id)
+                    );
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_workspace_view_settings_workspace_id ON workspace_view_settings (workspace_id);"
+                )
+
+                cursor.execute("PRAGMA user_version = 7;")
+                dbapi_conn.commit()
+                cursor.close()
+                version = 7
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Migration from version {version} to 7 failed. "
+                    "All changes rolled back."
+                ) from e
+
         # Final Verification Check: Ensure 'resource_references' table exists on startup
         cursor = connection.execute(
             text(
@@ -411,7 +455,7 @@ def init_db(engine: Engine) -> None:
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS ix_resource_references_original_node_id ON resource_references (original_node_id);"
                 )
-                cursor.execute("PRAGMA user_version = 6;")
+                cursor.execute("PRAGMA user_version = 7;")
                 dbapi_conn.commit()
                 cursor.close()
             except Exception as e:
@@ -421,6 +465,48 @@ def init_db(engine: Engine) -> None:
                     pass
                 raise DatabaseMigrationError(
                     f"Startup verification and creation of resource_references failed: {e}"
+                ) from e
+
+        # Final Verification Check: Ensure 'workspace_view_settings' table exists on startup
+        cursor = connection.execute(
+            text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='workspace_view_settings';"
+            )
+        )
+        if cursor.first() is None:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS workspace_view_settings (
+                        id VARCHAR NOT NULL,
+                        workspace_id VARCHAR NOT NULL,
+                        current_mode VARCHAR NOT NULL,
+                        last_filter_mask INTEGER NOT NULL,
+                        hide_empty_sections BOOLEAN NOT NULL,
+                        show_system BOOLEAN NOT NULL,
+                        show_custom BOOLEAN NOT NULL,
+                        created_at DATETIME NOT NULL,
+                        updated_at DATETIME NOT NULL,
+                        PRIMARY KEY (id),
+                        FOREIGN KEY(workspace_id) REFERENCES nodes (id) ON DELETE CASCADE,
+                        UNIQUE(workspace_id)
+                    );
+                """)
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS ix_workspace_view_settings_workspace_id ON workspace_view_settings (workspace_id);"
+                )
+                cursor.execute("PRAGMA user_version = 7;")
+                dbapi_conn.commit()
+                cursor.close()
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Startup verification and creation of workspace_view_settings failed: {e}"
                 ) from e
 
         # Relocate legacy workspaces and their children deterministically

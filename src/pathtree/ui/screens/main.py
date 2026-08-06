@@ -3,6 +3,7 @@
 import uuid
 from typing import ClassVar
 
+from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -121,6 +122,25 @@ class MainScreen(Screen[None]):
             )
         else:
             self.multi_launcher_service = None
+
+        # Initialize Workspace View Settings Service
+        if (
+            hasattr(self.node_service, "repository")
+            and self.node_service.repository is not None
+        ):
+            session = getattr(self.node_service.repository, "session", None)
+            if session is not None:
+                from pathtree.database.repository import WorkspaceViewSettingsRepository
+                from pathtree.services.workspace_view_settings_service import (
+                    WorkspaceViewSettingsService,
+                )
+
+                wvs_repo = WorkspaceViewSettingsRepository(session)
+                self.view_settings_service = WorkspaceViewSettingsService(wvs_repo)
+            else:
+                self.view_settings_service = None
+        else:
+            self.view_settings_service = None
 
         # Initialize Action Registry and Register Providers
         self.action_registry = ResourceActionRegistry()
@@ -875,6 +895,10 @@ class MainScreen(Screen[None]):
             details_panel.update_error(str(e))
             return
 
+        # Apply Workspace View Settings filtering on the tree nodes
+        if self.view_settings_service:
+            filtered_nodes = self.view_settings_service.filter_tree(filtered_nodes)
+
         is_now_non_empty = bool(self._last_query.strip())
 
         # Build list of visible IDs in the filtered tree
@@ -887,13 +911,41 @@ class MainScreen(Screen[None]):
 
         gather_ids(filtered_nodes)
 
+        def find_nearest_visible_ancestor(
+            node_id: uuid.UUID | None,
+        ) -> uuid.UUID | None:
+            if not node_id:
+                return None
+            curr_id = node_id
+            visited = set()
+            while curr_id is not None:
+                if curr_id in visited:
+                    break
+                visited.add(curr_id)
+                if curr_id in visible_ids:
+                    return curr_id
+                node = self.node_service.get_node(curr_id)
+                if not node:
+                    break
+                curr_id = node.parent_id
+            return None
+
         # Selection fallback logic
         target_id = None
-        if selected_node_id is not None and selected_node_id in visible_ids:
-            target_id = selected_node_id
-        elif fallback_node_id is not None and fallback_node_id in visible_ids:
-            target_id = fallback_node_id
-        elif visible_ids:
+        if selected_node_id is not None:
+            if selected_node_id in visible_ids:
+                target_id = selected_node_id
+            else:
+                # Find nearest visible ancestor if selected node becomes hidden
+                target_id = find_nearest_visible_ancestor(selected_node_id)
+
+        if target_id is None and fallback_node_id is not None:
+            if fallback_node_id in visible_ids:
+                target_id = fallback_node_id
+            else:
+                target_id = find_nearest_visible_ancestor(fallback_node_id)
+
+        if target_id is None and visible_ids:
             target_id = visible_ids[0]
 
         # Keep track of selected ID
@@ -910,12 +962,22 @@ class MainScreen(Screen[None]):
                     expanded_node_ids.add(curr_node.parent_id)
                 curr_id = curr_node.parent_id
 
+        # Get active filter workspace IDs from top-level loaded
+        # workspace nodes in memory
+        active_filter_workspace_ids = set()
+        if self.view_settings_service:
+            for tn in filtered_nodes:
+                if tn.node.node_kind == "workspace":
+                    if self.view_settings_service.has_active_filter(tn.node.id):
+                        active_filter_workspace_ids.add(tn.node.id)
+
         # Reload tree in the widget
         tree.load_tree(
             filtered_nodes,
             selected_node_id=target_id,
             expand_all=is_now_non_empty,
             expanded_node_ids=expanded_node_ids,
+            active_filter_workspace_ids=active_filter_workspace_ids,
         )
 
         if not filtered_nodes and is_now_non_empty:
@@ -1236,3 +1298,248 @@ class MainScreen(Screen[None]):
         """Move focus to NodeTreeView on Enter (without immediate activation)."""
         tree = self.query_one("#tree-view", NodeTreeView)
         tree.focus()
+
+    def on_key(self, event: events.Key) -> None:
+        """Handle key events to support the view command prefix 'v' state machine."""
+        if self.view_settings_service is None:
+            return
+
+        # 1. Check if view prefix is active
+        if getattr(self, "_view_prefix_active", False):
+            # Stop propagation and prevent default so other hotkeys or input don't run
+            event.stop()
+            event.prevent_default()
+
+            key = event.key
+            self._view_prefix_active = False
+            if hasattr(self, "_view_prefix_timer") and self._view_prefix_timer:
+                self._view_prefix_timer.cancel()
+
+            if key == "escape":
+                self.app.notify("View command canceled.")
+                return
+
+            # Execute view sequence
+            self._handle_view_command(key)
+            return
+
+        # 2. Check if the key is the first 'v'
+        # But we only enter view mode if we are NOT in an input field (like SearchInput)
+        focused = self.app.focused
+        inputs = (
+            "Input", "SearchInput", "HistoryInput", "PathAutocomplete"
+        )
+        if focused and focused.__class__.__name__ in inputs:
+            return
+
+        if event.key == "v":
+            event.stop()
+            event.prevent_default()
+
+            tree = self.query_one("#tree-view", NodeTreeView)
+            selected_node_id = tree.cursor_node.data if tree.cursor_node else None
+            workspace_id = self.node_service.resolve_workspace_context(selected_node_id)
+            if not workspace_id:
+                self.app.notify("No active workspace context.", severity="error")
+                return
+
+            self._view_prefix_active = True
+            self.app.notify("View command...", title="View Mode")
+            self._start_view_prefix_timer()
+
+    def _start_view_prefix_timer(self) -> None:
+        """Start a short-lived 2-second timer to cancel View prefix mode on timeout."""
+        if hasattr(self, "_view_prefix_timer") and self._view_prefix_timer:
+            self._view_prefix_timer.cancel()
+
+        def on_timeout():
+            if getattr(self, "_view_prefix_active", False):
+                self._view_prefix_active = False
+                self.app.notify("View command timed out.", severity="warning")
+
+        self._view_prefix_timer = self.set_timer(2.0, on_timeout)
+
+    def _handle_view_command(self, key: str) -> None:
+        """Handle the completed View sequence subkey."""
+        tree = self.query_one("#tree-view", NodeTreeView)
+        selected_node_id = tree.cursor_node.data if tree.cursor_node else None
+        workspace_id = self.node_service.resolve_workspace_context(selected_node_id)
+
+        if not workspace_id:
+            self.app.notify("No active workspace context.", severity="error")
+            return
+
+        settings = self.view_settings_service.get_settings(workspace_id)
+
+        # Import bits
+        from pathtree.services.workspace_view_settings_service import (
+            CUSTOM,
+            DIRECTORIES,
+            EXECUTABLES,
+            FILES,
+            LAUNCH_PROFILES,
+            MULTI_LAUNCHERS,
+            SCRIPTS,
+            URLS,
+        )
+
+        bit_map = {
+            "d": DIRECTORIES,
+            "f": FILES,
+            "s": SCRIPTS,
+            "e": EXECUTABLES,
+            "u": URLS,
+            "l": LAUNCH_PROFILES,
+            "m": MULTI_LAUNCHERS,
+        }
+
+        notif_vv = False
+        notif_vx = False
+
+        if key == "a":
+            # va: Toggle All View <-> Last Filter View
+            if settings.current_mode == "all":
+                # Only switch if a non-default filter is stored
+                has_stored = (
+                    settings.last_filter_mask > 0 or
+                    not settings.show_custom or
+                    not settings.show_system
+                )
+                if has_stored:
+                    settings.current_mode = "filter"
+            else:
+                settings.current_mode = "all"
+
+        elif key == "x":
+            # vx: Delete stored filter
+            settings = self.view_settings_service.clear_settings(workspace_id)
+            notif_vx = True
+
+        elif key == "v":
+            # vv: Toggle hide empty
+            settings.hide_empty_sections = not settings.hide_empty_sections
+            notif_vv = True
+
+        elif key in bit_map:
+            # Resource toggles
+            bit = bit_map[key]
+            if settings.current_mode == "all":
+                settings.current_mode = "filter"
+                settings.last_filter_mask = bit
+                settings.show_custom = False
+                settings.show_system = True
+            else:
+                settings.last_filter_mask ^= bit
+                # Safety return to All View if no filters left
+                has_res = bool(settings.last_filter_mask & ~CUSTOM)
+                if not has_res and not settings.show_custom:
+                    settings.current_mode = "all"
+                    settings.last_filter_mask = 0
+                    settings.show_system = True
+                    settings.show_custom = True
+
+        elif key == "c":
+            # vc: Toggle custom
+            if settings.current_mode == "all":
+                settings.current_mode = "filter"
+                settings.last_filter_mask = 0
+                settings.show_custom = True
+                settings.show_system = False
+            else:
+                settings.show_custom = not settings.show_custom
+                has_res = bool(settings.last_filter_mask & ~CUSTOM)
+                if not settings.show_custom and not has_res:
+                    settings.current_mode = "all"
+                    settings.last_filter_mask = 0
+                    settings.show_system = True
+                    settings.show_custom = True
+
+        elif key == "y":
+            # vy: Toggle System-only mode
+            if settings.current_mode == "all":
+                settings.current_mode = "filter"
+                settings.last_filter_mask = 0
+                settings.show_system = True
+                settings.show_custom = False
+            else:
+                # Toggle between System-only and both
+                if settings.show_system and not settings.show_custom:
+                    settings.show_custom = True
+                else:
+                    settings.show_system = True
+                    settings.show_custom = False
+
+        else:
+            self.app.notify(f"Invalid view command subkey: {key}", severity="error")
+            return
+
+        # Save settings & Notify & Refresh
+        self.view_settings_service.save_settings(settings)
+
+        if notif_vv:
+            status = "Hidden" if settings.hide_empty_sections else "Visible"
+            self.app.notify(f"Empty sections: {status}")
+        elif notif_vx:
+            self.app.notify("Saved workspace view cleared.")
+        else:
+            self._notify_view_state(settings)
+
+        self.refresh_tree(selected_node_id=selected_node_id)
+
+    def _notify_view_state(self, settings) -> None:
+        """Show a short notification describing the active View settings."""
+        from pathtree.services.workspace_view_settings_service import CUSTOM
+
+        if settings.current_mode == "all":
+            self.app.notify("View: All")
+            return
+
+        # Filter View
+        # Check Custom & System visibility
+        has_res_filters = bool(settings.last_filter_mask & ~CUSTOM)
+        show_custom = settings.show_custom
+        show_system = settings.show_system or has_res_filters
+
+        if show_custom and not show_system:
+            self.app.notify("View: Custom only")
+            return
+        if not show_custom and show_system and not has_res_filters:
+            self.app.notify("View: System only")
+            return
+
+        # Construct specific group list
+        active_groups = []
+        if has_res_filters:
+            from pathtree.services.workspace_view_settings_service import (
+                DIRECTORIES,
+                EXECUTABLES,
+                FILES,
+                LAUNCH_PROFILES,
+                MULTI_LAUNCHERS,
+                SCRIPTS,
+                URLS,
+            )
+            mask = settings.last_filter_mask
+            if mask & DIRECTORIES:
+                active_groups.append("Directories")
+            if mask & FILES:
+                active_groups.append("Files")
+            if mask & SCRIPTS:
+                active_groups.append("Scripts")
+            if mask & EXECUTABLES:
+                active_groups.append("Executables")
+            if mask & URLS:
+                active_groups.append("URLs")
+            if mask & LAUNCH_PROFILES:
+                active_groups.append("Launch Profiles")
+            if mask & MULTI_LAUNCHERS:
+                active_groups.append("Multi Launchers")
+        else:
+            if show_system:
+                active_groups.append("System")
+
+        if show_custom:
+            active_groups.append("Custom")
+
+        if active_groups:
+            self.app.notify(f"View: {', '.join(active_groups)}")
