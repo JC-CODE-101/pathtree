@@ -446,9 +446,9 @@ class MainScreen(Screen[None]):
                         ReferenceManagerDialog,
                     )
 
-                    def on_ref_mgr_finished(changed: bool) -> None:
-                        if changed:
-                            self.refresh_tree()
+                    def on_ref_mgr_finished(new_node_id: uuid.UUID | None) -> None:
+                        if new_node_id:
+                            self.refresh_tree(selected_node_id=new_node_id)
                         tree.focus()
 
                     self.app.push_screen(
@@ -465,9 +465,9 @@ class MainScreen(Screen[None]):
                         ReferenceManagerDialog,
                     )
 
-                    def on_ref_mgr_finished(changed: bool) -> None:
-                        if changed:
-                            self.refresh_tree(selected_node_id=node.id)
+                    def on_ref_mgr_finished(new_node_id: uuid.UUID | None) -> None:
+                        if new_node_id:
+                            self.refresh_tree(selected_node_id=new_node_id)
                         tree.focus()
 
                     self.app.push_screen(
@@ -484,9 +484,9 @@ class MainScreen(Screen[None]):
                         ReferenceManagerDialog,
                     )
 
-                    def on_ref_mgr_finished(changed: bool) -> None:
-                        if changed:
-                            self.refresh_tree()
+                    def on_ref_mgr_finished(new_node_id: uuid.UUID | None) -> None:
+                        if new_node_id:
+                            self.refresh_tree(selected_node_id=new_node_id)
                         tree.focus()
 
                     self.app.push_screen(
@@ -503,9 +503,9 @@ class MainScreen(Screen[None]):
                         ReferenceManagerDialog,
                     )
 
-                    def on_ref_mgr_finished(changed: bool) -> None:
-                        if changed:
-                            self.refresh_tree(selected_node_id=node.id)
+                    def on_ref_mgr_finished(new_node_id: uuid.UUID | None) -> None:
+                        if new_node_id:
+                            self.refresh_tree(selected_node_id=new_node_id)
                         tree.focus()
 
                     self.app.push_screen(

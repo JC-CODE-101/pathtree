@@ -550,6 +550,29 @@ def migrate_existing_workspaces(connection) -> None:
             "subsections": subsection_ids,
         }
 
+    # Helper to check if parent descends from Custom group of a given workspace
+    def is_descendant_of_custom(node_id: str | None, ws_id: str) -> bool:
+        if not node_id:
+            return False
+        curr_id = node_id.replace("-", "")
+        visited = set()
+        layout_custom = workspace_layouts.get(ws_id, {}).get("custom")
+        if not layout_custom:
+            return False
+        while curr_id is not None:
+            if curr_id in visited:
+                break
+            visited.add(curr_id)
+            if curr_id == layout_custom:
+                return True
+            node = nodes_by_id.get(curr_id)
+            if not node:
+                break
+            curr_id = node["parent_id"]
+            if curr_id:
+                curr_id = curr_id.replace("-", "")
+        return False
+
     # Now, relocate children of workspaces and subtrees
     for n in all_nodes:
         nid = n["id"]
@@ -572,23 +595,38 @@ def migrate_existing_workspaces(connection) -> None:
                 )
         elif n["node_kind"] == "resource":
             res_type = n["resource_type"] or "directory"
-            role_map = {
-                "directory": "directories",
-                "file": "files",
-                "script": "scripts",
-                "executable": "executables",
-                "url": "urls",
-                "launch_profile": "launch_profiles",
-                "multi_launcher": "multi_launchers",
-            }
-            role = role_map.get(res_type, "directories")
-            target_parent = layout["subsections"][role]
+            if res_type == "reference":
+                # Ensure it remains under Custom or a folder descending from Custom
+                parent_id = n["parent_id"]
+                if not is_descendant_of_custom(parent_id, ws_id):
+                    # Invalid parent, move to Custom root of this workspace!
+                    target_parent = layout["custom"]
+                    if parent_id != target_parent:
+                        connection.execute(
+                            text(
+                                "UPDATE nodes SET parent_id = :parent_id "
+                                "WHERE id = :id;"
+                            ),
+                            {"parent_id": target_parent, "id": nid},
+                        )
+            else:
+                role_map = {
+                    "directory": "directories",
+                    "file": "files",
+                    "script": "scripts",
+                    "executable": "executables",
+                    "url": "urls",
+                    "launch_profile": "launch_profiles",
+                    "multi_launcher": "multi_launchers",
+                }
+                role = role_map.get(res_type, "directories")
+                target_parent = layout["subsections"][role]
 
-            if n["parent_id"] != target_parent:
-                connection.execute(
-                    text("UPDATE nodes SET parent_id = :parent_id WHERE id = :id;"),
-                    {"parent_id": target_parent, "id": nid},
-                )
+                if n["parent_id"] != target_parent:
+                    connection.execute(
+                        text("UPDATE nodes SET parent_id = :parent_id WHERE id = :id;"),
+                        {"parent_id": target_parent, "id": nid},
+                    )
 
 
 _engine: Engine | None = None
