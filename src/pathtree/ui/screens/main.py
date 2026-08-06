@@ -9,7 +9,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.css.query import NoMatches
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Tree
+from textual.widgets import Footer, Header, Static, Tree
 
 from pathtree.actions import (
     DirectoryActionProvider,
@@ -220,10 +220,22 @@ class MainScreen(Screen[None]):
         with Horizontal():
             yield NodeTreeView(self.node_service, id="tree-view")
             yield NodeDetailsPanel(id="details-panel")
+        yield Static(
+            "[bold]VIEW MODE[/bold]  [cyan]a[/cyan] All · [cyan]x[/cyan] Clear · "
+            "[cyan]v[/cyan] Empty · [cyan]d[/cyan] Dirs · [cyan]f[/cyan] Files · "
+            "[cyan]s[/cyan] Scripts · [cyan]e[/cyan] Execs · [cyan]u[/cyan] URLs · "
+            "[cyan]l[/cyan] Profiles · [cyan]m[/cyan] Multi · [cyan]c[/cyan] Custom · "
+            "[cyan]y[/cyan] System · [cyan]Esc[/cyan] Cancel",
+            id="view-mode-bar"
+        )
         yield Footer()
 
     def on_mount(self) -> None:
         """Focus the tree view on startup and show initial selection."""
+        try:
+            self.query_one("#view-mode-bar").display = False
+        except NoMatches:
+            pass
         tree = self.query_one("#tree-view", NodeTreeView)
         tree.focus()
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
@@ -380,6 +392,7 @@ class MainScreen(Screen[None]):
         self, event: NodeTreeView.OpenActionMenu
     ) -> None:
         """Handle 'o' / 'O' key in tree to open Action Menu."""
+        self._clear_view_command_mode()
         tree = self.query_one("#tree-view", NodeTreeView)
         details_panel = self.query_one("#details-panel", NodeDetailsPanel)
 
@@ -576,6 +589,7 @@ class MainScreen(Screen[None]):
         self, event: NodeTreeView.OpenPinsList
     ) -> None:
         """Handle 'p' key in tree to open the Pins screen."""
+        self._clear_view_command_mode()
         from pathtree.ui.screens.pins import PinsScreen
 
         def handle_pins_screen_finished(selected_node_id: uuid.UUID | None) -> None:
@@ -994,6 +1008,7 @@ class MainScreen(Screen[None]):
 
     def on_node_tree_view_add_node(self, event: NodeTreeView.AddNode) -> None:
         """Handle 'a' key in tree to open Add Node Dialog."""
+        self._clear_view_command_mode()
         tree = self.query_one("#tree-view", NodeTreeView)
 
         # Capture expansion state before opening the dialog
@@ -1045,6 +1060,7 @@ class MainScreen(Screen[None]):
 
     def on_node_tree_view_edit_node(self, event: NodeTreeView.EditNode) -> None:
         """Handle 'e' key in tree to open Edit Node Dialog."""
+        self._clear_view_command_mode()
         tree = self.query_one("#tree-view", NodeTreeView)
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
@@ -1138,6 +1154,7 @@ class MainScreen(Screen[None]):
 
     def on_node_tree_view_move_node(self, event: NodeTreeView.MoveNode) -> None:
         """Handle 'm' key in tree to open Move Node Dialog."""
+        self._clear_view_command_mode()
         tree = self.query_one("#tree-view", NodeTreeView)
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
@@ -1169,6 +1186,7 @@ class MainScreen(Screen[None]):
 
     def on_node_tree_view_delete_node(self, event: NodeTreeView.DeleteNode) -> None:
         """Handle 'd' or 'delete' key in tree to open Confirm Delete Dialog."""
+        self._clear_view_command_mode()
         tree = self.query_one("#tree-view", NodeTreeView)
         if tree.cursor_node is None or tree.cursor_node.data is None:
             return
@@ -1299,32 +1317,53 @@ class MainScreen(Screen[None]):
         tree = self.query_one("#tree-view", NodeTreeView)
         tree.focus()
 
+    def _clear_view_command_mode(self) -> None:
+        """Clear the active View Command Mode and restore the standard footer."""
+        self._view_command_active = False
+        try:
+            self.query_one("#view-mode-bar").display = False
+            self.query_one("Footer").display = True
+        except NoMatches:
+            pass
+
+    def on_blur(self, event: events.Blur) -> None:
+        """Clear View Command Mode when MainScreen loses focus."""
+        self._clear_view_command_mode()
+
+    def on_descendant_focus(self, event: events.DescendantFocus) -> None:
+        """Cancel View Command Mode if a text input widget gets focused."""
+        if getattr(self, "_view_command_active", False):
+            widget = event.control
+            inputs = ("Input", "SearchInput", "HistoryInput", "PathAutocomplete")
+            if widget and widget.__class__.__name__ in inputs:
+                self._clear_view_command_mode()
+
     def on_key(self, event: events.Key) -> None:
-        """Handle key events to support the view command prefix 'v' state machine."""
+        """Handle key events to support the View Command Mode state machine."""
         if self.view_settings_service is None:
             return
 
-        # 1. Check if view prefix is active
-        if getattr(self, "_view_prefix_active", False):
-            # Stop propagation and prevent default so other hotkeys or input don't run
+        # 1. Check if view command mode is active
+        if getattr(self, "_view_command_active", False):
             event.stop()
             event.prevent_default()
 
             key = event.key
-            self._view_prefix_active = False
-            if hasattr(self, "_view_prefix_timer") and self._view_prefix_timer:
-                self._view_prefix_timer.cancel()
 
             if key == "escape":
+                self._clear_view_command_mode()
                 self.app.notify("View command canceled.")
                 return
 
-            # Execute view sequence
-            self._handle_view_command(key)
+            valid_keys = {"a", "x", "v", "d", "f", "s", "e", "u", "l", "m", "c", "y"}
+            if key in valid_keys:
+                self._clear_view_command_mode()
+                self._handle_view_command(key)
+            else:
+                self.app.notify(f"Unknown View command: {key}", severity="error")
             return
 
-        # 2. Check if the key is the first 'v'
-        # But we only enter view mode if we are NOT in an input field (like SearchInput)
+        # 2. Check if the key is the prefix 'v'
         focused = self.app.focused
         inputs = (
             "Input", "SearchInput", "HistoryInput", "PathAutocomplete"
@@ -1340,24 +1379,15 @@ class MainScreen(Screen[None]):
             selected_node_id = tree.cursor_node.data if tree.cursor_node else None
             workspace_id = self.node_service.resolve_workspace_context(selected_node_id)
             if not workspace_id:
-                self.app.notify("No active workspace context.", severity="error")
+                self.app.notify("No workspace selected.", severity="error")
                 return
 
-            self._view_prefix_active = True
-            self.app.notify("View command...", title="View Mode")
-            self._start_view_prefix_timer()
-
-    def _start_view_prefix_timer(self) -> None:
-        """Start a short-lived 2-second timer to cancel View prefix mode on timeout."""
-        if hasattr(self, "_view_prefix_timer") and self._view_prefix_timer:
-            self._view_prefix_timer.cancel()
-
-        def on_timeout():
-            if getattr(self, "_view_prefix_active", False):
-                self._view_prefix_active = False
-                self.app.notify("View command timed out.", severity="warning")
-
-        self._view_prefix_timer = self.set_timer(2.0, on_timeout)
+            self._view_command_active = True
+            try:
+                self.query_one("#view-mode-bar").display = True
+                self.query_one("Footer").display = False
+            except NoMatches:
+                pass
 
     def _handle_view_command(self, key: str) -> None:
         """Handle the completed View sequence subkey."""

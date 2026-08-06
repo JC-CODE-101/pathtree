@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 import pytest
 from sqlmodel import Session
 
@@ -302,3 +303,156 @@ def test_filter_indicator_icon_modes(monkeypatch):
     # 3. ASCII mode
     monkeypatch.setattr(icon_registry, "get_icon_mode", lambda: "ascii")
     assert icon_registry.get_filter_marker() == "[FILTER]"
+
+
+@pytest.mark.asyncio
+async def test_view_command_mode_keypress_scenarios(session: Session, tmp_path: Path) -> None:
+    """Rigorous TUI-based integration tests verifying View Command Mode sequences."""
+    from pathtree.ui.app import PathTreeApp
+    node_service = NodeService(NodeRepository(session))
+
+    # Initialize a clean workspace with System and Custom group layouts
+    ws = node_service.create_node(name="Test WS", node_kind="workspace", auto_layout=True)
+    # Put a File under Files subsection
+    files_subsection = node_service.get_system_subsection(ws.id, "file")
+    temp_file = tmp_path / "Data.txt"
+    temp_file.write_text("Hello")
+    node_service.create_node(
+        name="Data.txt",
+        node_kind="resource",
+        resource_type="file",
+        parent_id=files_subsection.id,
+        path=str(temp_file),  # valid file path
+    )
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Retrieve tree view and widgets
+        tree = app.screen.query_one("#tree-view")
+        view_bar = app.screen.query_one("#view-mode-bar")
+        footer = app.screen.query_one("Footer")
+
+        # Select Workspace
+        assert tree.cursor_node.data == ws.id
+        assert getattr(app.screen, "_view_command_active", False) is False
+        assert view_bar.display is False
+        assert footer.display is True
+
+        # --- Test 1: Press 'v' to enter View Command Mode ---
+        await pilot.press("v")
+        await pilot.pause(0.01)
+
+        assert getattr(app.screen, "_view_command_active", True) is True
+        assert view_bar.display is True
+        assert footer.display is False
+
+        # --- Test 2: Press 'f' to toggle Files filter and exit View Mode ---
+        await pilot.press("f")
+        await pilot.pause(0.01)
+
+        assert getattr(app.screen, "_view_command_active", False) is False
+        assert view_bar.display is False
+        assert footer.display is True
+
+        # Verify Files filter is active
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "filter"
+        assert settings.last_filter_mask == FILES
+
+        # --- Test 3: Escape cancels the View Mode ---
+        await pilot.press("v")
+        await pilot.pause(0.01)
+        assert getattr(app.screen, "_view_command_active", False) is True
+
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+        assert getattr(app.screen, "_view_command_active", False) is False
+        assert view_bar.display is False
+        assert footer.display is True
+
+        # --- Test 4: Unsupported key does not exit mode or crash ---
+        await pilot.press("v")
+        await pilot.pause(0.01)
+        assert getattr(app.screen, "_view_command_active", False) is True
+
+        await pilot.press("z")  # unsupported key
+        await pilot.pause(0.01)
+        # Should remain in View Command Mode
+        assert getattr(app.screen, "_view_command_active", False) is True
+        assert view_bar.display is True
+
+        # Escape to cancel
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+
+        # --- Test 5: Focus safety (entering search field clears mode) ---
+        await pilot.press("v")
+        await pilot.pause(0.01)
+        assert getattr(app.screen, "_view_command_active", False) is True
+
+        # Focus Search Input
+        search_input = app.screen.query_one("#search-input")
+        search_input.focus()
+        await pilot.pause(0.01)
+
+        # Mode must be automatically cleared!
+        assert getattr(app.screen, "_view_command_active", False) is False
+        assert view_bar.display is False
+        assert footer.display is True
+
+        # --- Test 6: v inside search field types normally ---
+        await pilot.press("v")
+        await pilot.pause(0.01)
+        assert search_input.value == "v"
+        assert getattr(app.screen, "_view_command_active", False) is False
+
+
+@pytest.mark.asyncio
+async def test_view_command_mode_dialog_safety(session: Session) -> None:
+    """Verify dialog opening/blurring safely cancels active View Command Mode."""
+    from pathtree.ui.app import PathTreeApp
+    from pathtree.ui.dialogs.add_node import AddNodeDialog
+
+    node_service = NodeService(NodeRepository(session))
+    ws = node_service.create_node(name="Test WS", node_kind="workspace", auto_layout=True)
+
+    app = PathTreeApp(node_service=node_service)
+    async with app.run_test() as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+        await pilot.pause(0.01)
+
+        # Enter view command mode
+        await pilot.press("v")
+        await pilot.pause(0.01)
+        assert getattr(app.screen, "_view_command_active", False) is True
+
+        # Trigger Add Node dialog directly to simulate push_screen and blur safely
+        app.screen.on_node_tree_view_add_node(None)
+        await pilot.pause(0.01)
+
+        # Assert we are on AddNodeDialog
+        assert isinstance(app.screen, AddNodeDialog)
+
+        # Cancel dialog
+        await pilot.press("escape")
+        await pilot.pause(0.01)
+
+        # Back to MainScreen
+        assert app.screen.id == "main-screen"
+        # Stale mode must be completely cleared!
+        assert getattr(app.screen, "_view_command_active", False) is False
+
+
+def test_no_timers_created_for_view_mode() -> None:
+    """Verify no timers or timer-cancel methods are used in screen or widget files."""
+    from pathlib import Path
+    main_file = Path("src/pathtree/ui/screens/main.py")
+    content = main_file.read_text(encoding="utf-8")
+    assert "set_timer" not in content
+    assert "timer.cancel" not in content.lower()
+    assert "_view_prefix_active" not in content
