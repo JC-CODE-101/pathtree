@@ -166,6 +166,12 @@ def build_node_label(node, context) -> IconText:
     label.append(" ")
     label.append(node.name, style=name_style)
 
+    if node_kind == "workspace" and context.get("has_filter", False):
+        filter_marker = icon_registry.get_filter_marker()
+        mode = icon_registry.get_icon_mode()
+        label.append(" ")
+        label.append(filter_marker, style="bold #00ffff" if mode != "ascii" else "dim")
+
     if is_reference:
         if is_broken:
             warning_ind = icon_registry.resolve(
@@ -413,6 +419,7 @@ class NodeTreeView(Tree[uuid.UUID]):
         selected_node_id: uuid.UUID | None = None,
         expand_all: bool = False,
         expanded_node_ids: set[uuid.UUID] | None = None,
+        active_filter_workspace_ids: set[uuid.UUID] | None = None,
     ) -> None:
         """Load the tree with a specific TreeNode hierarchy.
 
@@ -472,11 +479,18 @@ class NodeTreeView(Tree[uuid.UUID]):
                     is_broken = False
                     orig_node = nodes_by_id[ref_record.original_node_id]
 
+            has_filter = (
+                db_node.node_kind == "workspace"
+                and active_filter_workspace_ids is not None
+                and db_node.id in active_filter_workspace_ids
+            )
+
             context_dict = {
                 "pinned": db_node.id in pinned_node_ids,
                 "is_reference": is_ref,
                 "is_broken": is_broken,
                 "orig_node": orig_node,
+                "has_filter": has_filter,
             }
 
             label = build_node_label(db_node, context_dict)
