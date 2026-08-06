@@ -226,7 +226,7 @@ class MainScreen(Screen[None]):
             "[cyan]s[/cyan] Scripts · [cyan]e[/cyan] Execs · [cyan]u[/cyan] URLs · "
             "[cyan]l[/cyan] Profiles · [cyan]m[/cyan] Multi · [cyan]c[/cyan] Custom · "
             "[cyan]y[/cyan] System · [cyan]Esc[/cyan] Cancel",
-            id="view-mode-bar"
+            id="view-mode-bar",
         )
         yield Footer()
 
@@ -976,6 +976,42 @@ class MainScreen(Screen[None]):
                     expanded_node_ids.add(curr_node.parent_id)
                 curr_id = curr_node.parent_id
 
+        # Resolve current workspace context to apply auto-expand logic
+        current_workspace_id = None
+        if target_id is not None:
+            current_workspace_id = self.node_service.resolve_workspace_context(
+                target_id
+            )
+
+        # Auto-expand active filter sections for the current workspace context
+        if self.view_settings_service and current_workspace_id:
+            settings = self.view_settings_service.get_settings(current_workspace_id)
+            if settings.current_mode == "filter":
+                expanded_node_ids.add(current_workspace_id)
+
+                ws_tn = None
+                for tn in filtered_nodes:
+                    if tn.node.id == current_workspace_id:
+                        ws_tn = tn
+                        break
+
+                if ws_tn:
+                    from pathtree.services.workspace_view_settings_service import CUSTOM
+
+                    for child in ws_tn.children:
+                        if child.node.node_kind == "system_group":
+                            if child.node.system_role == "system":
+                                has_res_filters = bool(
+                                    settings.last_filter_mask & ~CUSTOM
+                                )
+                                if has_res_filters:
+                                    expanded_node_ids.add(child.node.id)
+                                    for sub in child.children:
+                                        expanded_node_ids.add(sub.node.id)
+                            elif child.node.system_role == "custom":
+                                if settings.show_custom:
+                                    expanded_node_ids.add(child.node.id)
+
         # Get active filter workspace IDs from top-level loaded
         # workspace nodes in memory
         active_filter_workspace_ids = set()
@@ -1365,9 +1401,7 @@ class MainScreen(Screen[None]):
 
         # 2. Check if the key is the prefix 'v'
         focused = self.app.focused
-        inputs = (
-            "Input", "SearchInput", "HistoryInput", "PathAutocomplete"
-        )
+        inputs = ("Input", "SearchInput", "HistoryInput", "PathAutocomplete")
         if focused and focused.__class__.__name__ in inputs:
             return
 
@@ -1431,9 +1465,9 @@ class MainScreen(Screen[None]):
             if settings.current_mode == "all":
                 # Only switch if a non-default filter is stored
                 has_stored = (
-                    settings.last_filter_mask > 0 or
-                    not settings.show_custom or
-                    not settings.show_system
+                    settings.last_filter_mask > 0
+                    or not settings.show_custom
+                    or not settings.show_system
                 )
                 if has_stored:
                     settings.current_mode = "filter"
@@ -1549,6 +1583,7 @@ class MainScreen(Screen[None]):
                 SCRIPTS,
                 URLS,
             )
+
             mask = settings.last_filter_mask
             if mask & DIRECTORIES:
                 active_groups.append("Directories")

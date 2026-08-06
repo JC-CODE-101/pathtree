@@ -5,14 +5,14 @@ from pathtree.models.workspace_view_settings import WorkspaceViewSettings
 from pathtree.services.node_service import TreeNode
 
 # Bitmask values for resource filters
-DIRECTORIES = 1 << 0      # 1
-FILES = 1 << 1            # 2
-SCRIPTS = 1 << 2          # 4
-EXECUTABLES = 1 << 3      # 8
-URLS = 1 << 4             # 16
+DIRECTORIES = 1 << 0  # 1
+FILES = 1 << 1  # 2
+SCRIPTS = 1 << 2  # 4
+EXECUTABLES = 1 << 3  # 8
+URLS = 1 << 4  # 16
 LAUNCH_PROFILES = 1 << 5  # 32
 MULTI_LAUNCHERS = 1 << 6  # 64
-CUSTOM = 1 << 7           # 128
+CUSTOM = 1 << 7  # 128
 
 
 class WorkspaceViewSettingsService:
@@ -117,10 +117,15 @@ class WorkspaceViewSettingsService:
                             for sub in child.children:
                                 is_managed_sub = (
                                     sub.node.node_kind == "system_group"
-                                    and sub.node.system_role in (
-                                        "directories", "files", "scripts",
-                                        "executables", "urls",
-                                        "launch_profiles", "multi_launchers"
+                                    and sub.node.system_role
+                                    in (
+                                        "directories",
+                                        "files",
+                                        "scripts",
+                                        "executables",
+                                        "urls",
+                                        "launch_profiles",
+                                        "multi_launchers",
                                     )
                                 )
                                 if is_managed_sub:
@@ -160,10 +165,15 @@ class WorkspaceViewSettingsService:
                     for sub in child.children:
                         is_managed_sub = (
                             sub.node.node_kind == "system_group"
-                            and sub.node.system_role in (
-                                "directories", "files", "scripts",
-                                "executables", "urls",
-                                "launch_profiles", "multi_launchers"
+                            and sub.node.system_role
+                            in (
+                                "directories",
+                                "files",
+                                "scripts",
+                                "executables",
+                                "urls",
+                                "launch_profiles",
+                                "multi_launchers",
                             )
                         )
                         if is_managed_sub:
@@ -191,16 +201,13 @@ class WorkspaceViewSettingsService:
                                         new_subsections.append(sub)
                             else:
                                 is_empty_filtered = (
-                                    settings.hide_empty_sections
-                                    and not sub.children
+                                    settings.hide_empty_sections and not sub.children
                                 )
                                 if not is_empty_filtered:
                                     new_subsections.append(sub)
                         else:
                             new_subsections.append(sub)
-                    filtered_children.append(
-                        TreeNode(child.node, new_subsections)
-                    )
+                    filtered_children.append(TreeNode(child.node, new_subsections))
 
                 elif (
                     child.node.node_kind == "system_group"

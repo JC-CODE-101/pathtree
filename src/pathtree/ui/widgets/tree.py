@@ -480,9 +480,9 @@ class NodeTreeView(Tree[uuid.UUID]):
                     orig_node = nodes_by_id[ref_record.original_node_id]
 
             has_filter = (
-                db_node.node_kind == "workspace" and
-                active_filter_workspace_ids is not None and
-                db_node.id in active_filter_workspace_ids
+                db_node.node_kind == "workspace"
+                and active_filter_workspace_ids is not None
+                and db_node.id in active_filter_workspace_ids
             )
 
             context_dict = {
