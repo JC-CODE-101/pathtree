@@ -88,7 +88,10 @@ def build_node_label(node, context) -> IconText:
     if node_kind == "workspace":
         workspace_accent = getattr(node, "accent_color", "default") or "default"
 
-    if node_kind == "workspace":
+    if node_kind == "workspace_group":
+        icon_style = "bold #ffaa00"
+        name_style = "bold #ffaa00"
+    elif node_kind == "workspace":
         accent_color_map = {
             "default": "bold #ffffff",
             "red": "bold #ff5555",

@@ -170,6 +170,25 @@ class NodeService:
 
         return [build_subtree(root) for root in ordered_roots]
 
+    def dissolve_group(self, group_id: uuid.UUID) -> bool:
+        """Dissolve a workspace group, reparenting all child workspaces to Root, and delete the group."""
+        group = self.repository.get_by_id(group_id)
+        if group is None:
+            raise NodeNotFoundError(f"Workspace Group {group_id} does not exist.")
+        if group.node_kind != "workspace_group":
+            raise ValidationError("Node is not a Workspace Group.")
+
+        # Find all child workspaces
+        children = self.repository.list_children(group_id)
+        for child in children:
+            if child.node_kind == "workspace":
+                child.parent_id = None
+                self.repository.update(child)
+
+        # Now delete the empty group
+        self.repository.delete(group_id)
+        return True
+
     def validate_parent(
         self,
         node_id: uuid.UUID | None,
@@ -191,8 +210,13 @@ class NodeService:
                 node_kind = node.node_kind
 
         # 1. Enforce hierarchy rules for Workspaces, Folders, and Directories
+        if node_kind == "workspace_group" and parent_id is not None:
+            raise ValidationError("Workspace Group must be created under Root.")
+
         if node_kind == "workspace" and parent_id is not None:
-            raise ValidationError("Workspace may only exist at Root.")
+            parent_node = self.repository.get_by_id(parent_id)
+            if parent_node is None or parent_node.node_kind != "workspace_group":
+                raise ValidationError("Workspace parent must be a Workspace Group.")
 
         if node_kind in ("folder", "resource", "system_group") and parent_id is None:
             raise ValidationError(
@@ -212,12 +236,20 @@ class NodeService:
         if parent_node is None:
             raise ParentNotFoundError(f"Parent node {parent_id} does not exist.")
 
-        # 3. Rejects parent nodes that are not in {"workspace", "folder", "system_group"}
-        if parent_node.node_kind not in {"workspace", "folder", "system_group"}:
+        # 3. Rejects parent nodes that are not in {"workspace", "folder", "system_group", "workspace_group"}
+        if parent_node.node_kind not in {
+            "workspace",
+            "folder",
+            "system_group",
+            "workspace_group",
+        }:
             raise InvalidParentKindError(
                 f"Parent node {parent_id} kind "
                 f"'{parent_node.node_kind}' is not allowed."
             )
+
+        if parent_node.node_kind == "workspace_group" and node_kind != "workspace":
+            raise ValidationError("Workspace Group may only contain Workspaces.")
 
         if node_id is not None:
             # 4. Prevent moving a node below one of its descendants
@@ -354,6 +386,7 @@ class NodeService:
         """Validate node kind and resource type combination.
 
         Only specific combinations of node_kind and resource_type are valid:
+        - node_kind = "workspace_group" and resource_type = None
         - node_kind = "workspace" and resource_type = None
         - node_kind = "folder" and resource_type = None
         - node_kind = "system_group" and resource_type = None
@@ -371,7 +404,9 @@ class NodeService:
         res_type = node.resource_type
 
         valid = False
-        if kind == "workspace" and res_type is None:
+        if kind == "workspace_group" and res_type is None:
+            valid = True
+        elif kind == "workspace" and res_type is None:
             valid = True
         elif kind == "folder" and res_type is None:
             valid = True
@@ -641,7 +676,7 @@ class NodeService:
 
         # 5. Check structural workspace and folder nodes must not contain a path
         if (
-            node_kind in ("workspace", "folder", "system_group")
+            node_kind in ("workspace", "folder", "system_group", "workspace_group")
             and normalized_path is not None
         ):
             raise ValidationError("Structural nodes must not contain a path.")
@@ -822,7 +857,7 @@ class NodeService:
                     normalized_path = normalize_path(new_path)
 
             if (
-                node.node_kind in ("workspace", "folder")
+                node.node_kind in ("workspace", "folder", "workspace_group")
                 and normalized_path is not None
             ):
                 raise ValidationError("Structural nodes must not contain a path.")
@@ -881,7 +916,7 @@ class NodeService:
         )
         self.validate_node(dummy_node)
         if (
-            dummy_node.node_kind in ("workspace", "folder")
+            dummy_node.node_kind in ("workspace", "folder", "workspace_group")
             and dummy_node.path is not None
         ):
             raise ValidationError("Structural nodes must not contain a path.")
@@ -1219,8 +1254,18 @@ class NodeService:
         current_parent_id: uuid.UUID | None = None,
         workspace_id: uuid.UUID | None = None,
     ) -> list[tuple[str, uuid.UUID | None]]:
-        if node_kind == "workspace":
+        if node_kind == "workspace_group":
             return [("Root", None)]
+
+        if node_kind == "workspace":
+            choices = [("Root", None)]
+            all_nodes = self.repository.list_all()
+            for node in all_nodes:
+                if node.node_kind == "workspace_group":
+                    if exclude_node_id is not None and node.id == exclude_node_id:
+                        continue
+                    choices.append((node.name, node.id))
+            return choices
 
         choices: list[tuple[str, uuid.UUID | None]] = []
 

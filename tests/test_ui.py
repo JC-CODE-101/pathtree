@@ -2496,12 +2496,22 @@ async def test_add_node_dialog_vim_navigation(session: Session) -> None:
         await pilot.pause(0.01)
         assert dialog.selected_type == "multi_launcher"
 
-        # Test wrapping with 'j' moves Multi Launcher -> Workspace
+        # Test wrapping with 'j' moves Multi Launcher -> Workspace Group
+        await pilot.press("j")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "workspace_group"
+
+        # Test wrapping with 'j' moves Workspace Group -> Workspace
         await pilot.press("j")
         await pilot.pause(0.01)
         assert dialog.selected_type == "workspace"
 
-        # Test 'k' moves Workspace -> Multi Launcher (wrapping)
+        # Test 'k' moves Workspace -> Workspace Group (wrapping)
+        await pilot.press("k")
+        await pilot.pause(0.01)
+        assert dialog.selected_type == "workspace_group"
+
+        # Test 'k' moves Workspace Group -> Multi Launcher (wrapping)
         await pilot.press("k")
         await pilot.pause(0.01)
         assert dialog.selected_type == "multi_launcher"

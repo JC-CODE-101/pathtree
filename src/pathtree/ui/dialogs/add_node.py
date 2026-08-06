@@ -189,6 +189,7 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
                     yield RadioButton("Executable", id="radio-executable")
                     yield RadioButton("URL", id="radio-url")
                     yield RadioButton("Multi Launcher", id="radio-multi-launcher")
+                    yield RadioButton("Workspace Group", id="radio-workspace-group")
 
             with Vertical(classes="field-container"):
                 yield Label("Name *", classes="field-label")
@@ -243,9 +244,29 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
     def on_mount(self) -> None:
         self.update_parent_choices()
 
+    def _find_workspace_group_context(
+        self, node_id: uuid.UUID | None
+    ) -> uuid.UUID | None:
+        if node_id is None:
+            return None
+        curr = self.node_service.get_node(node_id)
+        while curr is not None:
+            if curr.node_kind == "workspace_group":
+                return curr.id
+            if curr.parent_id is not None:
+                parent = self.node_service.get_node(curr.parent_id)
+                if parent and parent.node_kind == "workspace_group":
+                    return parent.id
+            curr = (
+                self.node_service.get_node(curr.parent_id) if curr.parent_id else None
+            )
+        return None
+
     def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
         radio_id = event.pressed.id
-        if radio_id == "radio-workspace":
+        if radio_id == "radio-workspace-group":
+            self.selected_type = "workspace_group"
+        elif radio_id == "radio-workspace":
             self.selected_type = "workspace"
         elif radio_id == "radio-folder":
             self.selected_type = "folder"
@@ -263,7 +284,9 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             self.selected_type = "multi_launcher"
 
         icon_picker = self.query_one(IconPicker)
-        if self.selected_type == "workspace":
+        if self.selected_type == "workspace_group":
+            icon_picker.set_node_type("workspace_group", None)
+        elif self.selected_type == "workspace":
             icon_picker.set_node_type("workspace", None)
         elif self.selected_type == "folder":
             icon_picker.set_node_type("folder", None)
@@ -309,6 +332,16 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
         create_btn = self.query_one("#btn-create", Button)
 
         has_no_workspace = self.workspace_id is None
+
+        if self.selected_type == "workspace_group":
+            path_container.display = False
+            temp_checkbox.display = False
+            parent_container.display = False
+            dest_container.display = False
+            select_parent.disabled = True
+            warning_area.update("")
+            create_btn.disabled = False
+            return
 
         if self.selected_type == "workspace":
             path_container.display = False
@@ -497,12 +530,23 @@ class AddNodeDialog(ModalScreen[uuid.UUID | None]):
             and self.node_service._has_custom_group(self.workspace_id)
         )
 
-        if self.selected_type == "workspace":
+        if self.selected_type == "workspace_group":
+            node_kind = "workspace_group"
+            resource_type = None
+            path = None
+            is_temporary = False
+            parent_id = None
+            auto_layout = False
+        elif self.selected_type == "workspace":
             node_kind = "workspace"
             resource_type = None
             path = None
             is_temporary = False
-            parent_id = None  # Always force Workspace to be at root (None)
+            # Check context-aware workspace group parenting
+            group_context_id = self._find_workspace_group_context(
+                self.default_parent_id
+            )
+            parent_id = group_context_id  # If group exists, make it a child of that group, else None
             auto_layout = True
         elif self.selected_type == "folder":
             node_kind = "folder"
