@@ -88,7 +88,10 @@ def build_node_label(node, context) -> IconText:
     if node_kind == "workspace":
         workspace_accent = getattr(node, "accent_color", "default") or "default"
 
-    if node_kind == "workspace":
+    if node_kind == "workspace_group":
+        icon_style = "bold #ffaa00"
+        name_style = "bold #ffaa00"
+    elif node_kind == "workspace":
         accent_color_map = {
             "default": "bold #ffffff",
             "red": "bold #ff5555",
@@ -525,6 +528,15 @@ class NodeTreeView(Tree[uuid.UUID]):
             self.call_after_refresh(self.scroll_to_node, target_node)
         elif not self.show_root and self.root.children:
             self.call_after_refresh(self.move_cursor, self.root.children[0])
+
+    async def _on_key(self, event: events.Key) -> None:
+        """Intercept keys before they are processed by local bindings if view command mode is active."""
+        if getattr(self.screen, "_view_command_active", False):
+            event.stop()
+            event.prevent_default()
+            self.screen.on_key(event)
+            return
+        await super()._on_key(event)
 
     def populate_tree(self) -> None:
         """Populate branches from service-provided nodes recursively."""

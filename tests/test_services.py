@@ -916,7 +916,9 @@ def test_hierarchy_rules_create(node_service: NodeService) -> None:
     assert ws1.parent_id is None
 
     # - Workspace beneath Workspace is rejected.
-    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+    with pytest.raises(
+        ValidationError, match="Workspace parent must be a Workspace Group"
+    ):
         node_service.create_node(
             name="WS Under WS", node_kind="workspace", parent_id=ws1.id
         )
@@ -928,7 +930,9 @@ def test_hierarchy_rules_create(node_service: NodeService) -> None:
     assert f1.parent_id == ws1.id
 
     # - Workspace beneath Folder is rejected.
-    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+    with pytest.raises(
+        ValidationError, match="Workspace parent must be a Workspace Group"
+    ):
         node_service.create_node(
             name="WS Under Folder", node_kind="workspace", parent_id=f1.id
         )
@@ -943,7 +947,9 @@ def test_hierarchy_rules_create(node_service: NodeService) -> None:
     assert dir1.parent_id == ws1.id
 
     # - Workspace beneath Directory is rejected.
-    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+    with pytest.raises(
+        ValidationError, match="Workspace parent must be a Workspace Group"
+    ):
         node_service.create_node(
             name="WS Under Dir", node_kind="workspace", parent_id=dir1.id
         )
@@ -1005,15 +1011,21 @@ def test_hierarchy_rules_move(node_service: NodeService) -> None:
     )
 
     # - Workspace beneath Workspace is rejected on move.
-    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+    with pytest.raises(
+        ValidationError, match="Workspace parent must be a Workspace Group"
+    ):
         node_service.move_node(ws1.id, ws2.id)
 
     # - Workspace beneath Folder is rejected on move.
-    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+    with pytest.raises(
+        ValidationError, match="Workspace parent must be a Workspace Group"
+    ):
         node_service.move_node(ws1.id, f1.id)
 
     # - Workspace beneath Directory is rejected on move.
-    with pytest.raises(ValidationError, match="Workspace may only exist at Root"):
+    with pytest.raises(
+        ValidationError, match="Workspace parent must be a Workspace Group"
+    ):
         node_service.move_node(ws1.id, dir1.id)
 
     # - Folder at Root is rejected on move.

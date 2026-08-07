@@ -56,19 +56,20 @@ def create_db_engine(db_path: Path) -> Engine:
 
 
 def init_db(engine: Engine) -> None:
-    """Query user_version, generate tables if needed, and migrate to version 7.
+    """Query user_version, generate tables if needed, and migrate to version 8.
 
-    If the database reports user_version > 7, we refuse startup with
+    If the database reports user_version > 8, we refuse startup with
     UnsupportedDatabaseVersionError.
-    Fresh database creates tables directly at version 7.
+    Fresh database creates tables directly at version 8.
     An existing version 1 (or 0) database is migrated transactionally to
-    version 2, then to 3, to 4, to 5, to 6, and then to 7.
-    An existing version 2 database is migrated to 3, 4, 5, 6, and then to 7.
-    An existing version 3 database is migrated to 4, 5, 6, and then to 7.
-    An existing version 4 database is migrated to 5, 6, and then to 7.
-    An existing version 5 database is migrated to 6 and then to 7.
-    An existing version 6 database is migrated to 7.
-    Version 7 database no-ops cleanly.
+    version 2, then to 3, to 4, to 5, to 6, to 7, and then to 8.
+    An existing version 2 database is migrated to 3, 4, 5, 6, 7, and then to 8.
+    An existing version 3 database is migrated to 4, 5, 6, 7, and then to 8.
+    An existing version 4 database is migrated to 5, 6, 7, and then to 8.
+    An existing version 5 database is migrated to 6, 7, and then to 8.
+    An existing version 6 database is migrated to 7, and then to 8.
+    An existing version 7 database is migrated to 8.
+    Version 8 database no-ops cleanly.
     """
     with Session(engine) as session:
         connection = session.connection()
@@ -76,9 +77,9 @@ def init_db(engine: Engine) -> None:
         # Read version before any database mutation or table checks
         version = connection.execute(text("PRAGMA user_version;")).scalar() or 0
 
-        if version > 7:
+        if version > 8:
             raise UnsupportedDatabaseVersionError(
-                f"Database version {version} is newer than the supported version 7."
+                f"Database version {version} is newer than the supported version 8."
             )
 
         # Check if 'nodes' table exists after version check
@@ -90,8 +91,8 @@ def init_db(engine: Engine) -> None:
         if not table_exists:
             # Create all tables defined in SQLModel metadata
             SQLModel.metadata.create_all(engine)
-            # Set user_version to 7
-            connection.execute(text("PRAGMA user_version = 7;"))
+            # Set user_version to 8
+            connection.execute(text("PRAGMA user_version = 8;"))
             session.commit()
             return
 
@@ -426,6 +427,27 @@ def init_db(engine: Engine) -> None:
                     "All changes rolled back."
                 ) from e
 
+        if version == 7:
+            dbapi_conn = connection.connection.dbapi_connection
+            try:
+                cursor = dbapi_conn.cursor()
+                cursor.execute("BEGIN TRANSACTION;")
+
+                # Version 8: No direct schema changes, user_version update only.
+                cursor.execute("PRAGMA user_version = 8;")
+                dbapi_conn.commit()
+                cursor.close()
+                version = 8
+            except Exception as e:
+                try:
+                    dbapi_conn.rollback()
+                except Exception:
+                    pass
+                raise DatabaseMigrationError(
+                    f"Migration from version {version} to 8 failed. "
+                    "All changes rolled back."
+                ) from e
+
         # Final Verification Check: Ensure 'resource_references' table exists on startup
         cursor = connection.execute(
             text(
@@ -455,7 +477,7 @@ def init_db(engine: Engine) -> None:
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS ix_resource_references_original_node_id ON resource_references (original_node_id);"
                 )
-                cursor.execute("PRAGMA user_version = 7;")
+                cursor.execute("PRAGMA user_version = 8;")
                 dbapi_conn.commit()
                 cursor.close()
             except Exception as e:

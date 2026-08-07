@@ -16,7 +16,9 @@ class IconOption:
 
 def classify_node_type(node_kind: str, resource_type: str | None) -> str:
     """Classify a node into one of the central catalog keys."""
-    if node_kind == "workspace":
+    if node_kind == "workspace_group":
+        return "workspace_group"
+    elif node_kind == "workspace":
         return "workspace"
     elif node_kind == "folder":
         return "folder"
@@ -40,6 +42,7 @@ def classify_node_type(node_kind: str, resource_type: str | None) -> str:
 # Central mappings for all semantic resource types in nerd, unicode, and ascii modes
 ICONS_BY_MODE = {
     "nerd": {
+        "workspace_group": "󰙅",
         "workspace": "󰙅",
         "system": "󰒓",
         "custom": "󰙵",
@@ -66,6 +69,7 @@ ICONS_BY_MODE = {
         "generic_fallback": "󰈔",
     },
     "unicode": {
+        "workspace_group": "❖",
         "workspace": "◆",
         "system": "⚙",
         "custom": "🏡",
@@ -92,6 +96,7 @@ ICONS_BY_MODE = {
         "generic_fallback": "▪",
     },
     "ascii": {
+        "workspace_group": "[WG]",
         "workspace": "[WS]",
         "system": "[SYS]",
         "custom": "[CUST]",
@@ -189,6 +194,13 @@ EXTENSION_ICONS_BY_MODE = {
 
 
 UNICODE_SAFE_PACK = {
+    "workspace_group": {
+        "default": IconOption("❖", "Accent Diamond"),
+        "options": [
+            IconOption("❖", "Accent Diamond"),
+            IconOption("✦", "Star"),
+        ],
+    },
     "workspace": {
         "default": IconOption("◆", "Diamond"),
         "options": [
@@ -265,6 +277,12 @@ UNICODE_SAFE_PACK = {
 
 
 NERD_FONTS_PACK = {
+    "workspace_group": {
+        "default": IconOption("󰙅", "Workspace Group"),
+        "options": [
+            IconOption("󰙅", "Workspace Group"),
+        ],
+    },
     "workspace": {
         "default": IconOption("󰙅", "Workspace"),
         "options": [
@@ -340,6 +358,12 @@ NERD_FONTS_PACK = {
 
 
 ASCII_PACK = {
+    "workspace_group": {
+        "default": IconOption("[WG]", "Workspace Group"),
+        "options": [
+            IconOption("[WG]", "Workspace Group"),
+        ],
+    },
     "workspace": {
         "default": IconOption("[WS]", "Workspace"),
         "options": [

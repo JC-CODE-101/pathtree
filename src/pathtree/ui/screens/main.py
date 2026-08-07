@@ -59,6 +59,8 @@ class MainScreen(Screen[None]):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("enter", "activate_selected", "Select", show=True),
         Binding("q", "quit", "Quit", show=True),
+        Binding("escape", "leave_focus", "Back", show=False),
+        Binding("backspace", "leave_focus", "Back", show=False),
     ]
 
     def __init__(
@@ -78,6 +80,7 @@ class MainScreen(Screen[None]):
         self._pre_search_expanded_node_ids: set[uuid.UUID] | None = None
         self._db_is_empty: bool = False
         self._current_tree_state: TreeState = TreeState()
+        self._focused_group_id: uuid.UUID | None = None
 
         # Initialize Pin Service
         if (
@@ -388,6 +391,13 @@ class MainScreen(Screen[None]):
         self.save_state()
         self.app.exit(return_code=0)
 
+    def action_leave_focus(self) -> None:
+        """Leave Focus Mode and restore the complete tree, preserving selection."""
+        if self._focused_group_id is not None:
+            self._focused_group_id = None
+            self.refresh_tree(selected_node_id=self._last_selected_node_id)
+            self.app.notify("Exited Focus Mode")
+
     def on_node_tree_view_open_action_menu(
         self, event: NodeTreeView.OpenActionMenu
     ) -> None:
@@ -413,6 +423,30 @@ class MainScreen(Screen[None]):
         actions = []
         provider = None
         context = None
+
+        # Resolve actions for Workspace Groups
+        if node.node_kind == "workspace_group":
+            from pathtree.actions.base import ResourceAction
+
+            actions.extend(
+                [
+                    ResourceAction(
+                        id="focus_group",
+                        label="Focus Group",
+                        description="Focus this workspace group",
+                    ),
+                    ResourceAction(
+                        id="rename_group",
+                        label="Rename Group",
+                        description="Rename this workspace group",
+                    ),
+                    ResourceAction(
+                        id="dissolve_group",
+                        label="Dissolve Group",
+                        description="Dissolve group and move workspaces to Root",
+                    ),
+                ]
+            )
 
         # Resolve provider-specific actions for Resource nodes
         if node.node_kind == "resource":
@@ -466,7 +500,30 @@ class MainScreen(Screen[None]):
         def handle_action_menu_finished(result: ActionMenuResult | None) -> None:
             tree.focus()
             if result is not None and result.action_id is not None:
-                if result.action_id == "pin_node":
+                if result.action_id == "focus_group":
+                    self._focused_group_id = node.id
+                    self.refresh_tree(selected_node_id=node.id)
+                    self.app.notify(f"Focused on group '{node.name}'")
+                elif result.action_id == "rename_group":
+                    from pathtree.ui.dialogs.edit_node import EditNodeDialog
+
+                    def on_rename_finished(success: bool) -> None:
+                        if success:
+                            self.app.notify(f"Renamed group to '{node.name}'")
+                            self.refresh_tree(selected_node_id=node.id)
+                        tree.focus()
+
+                    self.app.push_screen(
+                        EditNodeDialog(self.node_service, node.id),
+                        callback=on_rename_finished,
+                    )
+                elif result.action_id == "dissolve_group":
+                    self.node_service.dissolve_group(node.id)
+                    self.app.notify(
+                        f"Dissolved group '{node.name}'. Workspaces moved to Root."
+                    )
+                    self.refresh_tree()
+                elif result.action_id == "pin_node":
                     self.pin_service.pin_node(node.id)
                     self.app.notify(f'Pinned "{node.name}" globally')
                     self.refresh_tree(selected_node_id=node.id)
@@ -909,6 +966,13 @@ class MainScreen(Screen[None]):
             details_panel.update_error(str(e))
             return
 
+        # Prune filtered nodes to show only focused group
+        # and its descendants if focus is active
+        if self._focused_group_id is not None:
+            filtered_nodes = [
+                tn for tn in filtered_nodes if tn.node.id == self._focused_group_id
+            ]
+
         # Apply Workspace View Settings filtering on the tree nodes
         if self.view_settings_service:
             filtered_nodes = self.view_settings_service.filter_tree(filtered_nodes)
@@ -1236,6 +1300,12 @@ class MainScreen(Screen[None]):
             self.app.notify("Managed sections cannot be deleted.", severity="error")
             return
 
+        if node.node_kind == "workspace_group":
+            self.node_service.dissolve_group(node.id)
+            self.app.notify(f"Dissolved group '{node.name}'. Workspaces moved to Root.")
+            self.refresh_tree()
+            return
+
         # Capture expansion state before opening the dialog
         captured_expanded_node_ids = tree.get_expanded_node_ids()
 
@@ -1468,6 +1538,7 @@ class MainScreen(Screen[None]):
                     settings.last_filter_mask > 0
                     or not settings.show_custom
                     or not settings.show_system
+                    or settings.hide_empty_sections
                 )
                 if has_stored:
                     settings.current_mode = "filter"
