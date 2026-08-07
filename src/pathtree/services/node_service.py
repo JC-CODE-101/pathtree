@@ -171,7 +171,10 @@ class NodeService:
         return [build_subtree(root) for root in ordered_roots]
 
     def dissolve_group(self, group_id: uuid.UUID) -> bool:
-        """Dissolve a workspace group, reparenting all child workspaces to Root, and delete the group."""
+        """Dissolve a workspace group, reparenting all child workspaces to Root.
+
+        Then delete the group.
+        """
         group = self.repository.get_by_id(group_id)
         if group is None:
             raise NodeNotFoundError(f"Workspace Group {group_id} does not exist.")
@@ -220,7 +223,8 @@ class NodeService:
 
         if node_kind in ("folder", "resource", "system_group") and parent_id is None:
             raise ValidationError(
-                f"{node_kind.capitalize().replace('_', ' ')} cannot be created under Root "
+                f"{node_kind.capitalize().replace('_', ' ')} "
+                "cannot be created under Root "
                 "(parent must be Workspace or Folder)."
             )
 
@@ -236,7 +240,8 @@ class NodeService:
         if parent_node is None:
             raise ParentNotFoundError(f"Parent node {parent_id} does not exist.")
 
-        # 3. Rejects parent nodes that are not in {"workspace", "folder", "system_group", "workspace_group"}
+        # 3. Rejects parent nodes that are not in
+        # {"workspace", "folder", "system_group", "workspace_group"}
         if parent_node.node_kind not in {
             "workspace",
             "folder",
@@ -1148,14 +1153,16 @@ class NodeService:
                         profile.working_directory_node_id = None
                         launch_profile_repo.update(profile)
 
-                    # 3. If a launch profile node is itself deleted, delete its launch profile record
+                    # 3. If a launch profile node is itself deleted,
+                    # delete its launch profile record
                     if (
                         target_node.node_kind == "resource"
                         and target_node.resource_type == "launch_profile"
                     ):
                         profile = launch_profile_repo.get_by_profile_node_id(nid)
                         if profile:
-                            # Delete referencing MultiLauncherItems to avoid foreign key violations
+                            # Delete referencing MultiLauncherItems to avoid
+                            # foreign key violations
                             from sqlmodel import delete
 
                             from pathtree.models.multi_launcher import MultiLauncherItem
@@ -1170,7 +1177,8 @@ class NodeService:
                                 pass
                             launch_profile_repo.delete(profile.id)
 
-                    # 3b. If a multi launcher node is itself deleted, delete its multi launcher record
+                    # 3b. If a multi launcher node is itself deleted,
+                    # delete its multi launcher record
                     if (
                         target_node.node_kind == "resource"
                         and target_node.resource_type == "multi_launcher"

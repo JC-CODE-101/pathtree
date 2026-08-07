@@ -433,7 +433,7 @@ def init_db(engine: Engine) -> None:
                 cursor = dbapi_conn.cursor()
                 cursor.execute("BEGIN TRANSACTION;")
 
-                # Version 8: No direct schema changes required, user_version update only.
+                # Version 8: No direct schema changes, user_version update only.
                 cursor.execute("PRAGMA user_version = 8;")
                 dbapi_conn.commit()
                 cursor.close()

@@ -966,7 +966,8 @@ class MainScreen(Screen[None]):
             details_panel.update_error(str(e))
             return
 
-        # Prune filtered nodes to show only focused group and its descendants if focus is active
+        # Prune filtered nodes to show only focused group
+        # and its descendants if focus is active
         if self._focused_group_id is not None:
             filtered_nodes = [
                 tn for tn in filtered_nodes if tn.node.id == self._focused_group_id

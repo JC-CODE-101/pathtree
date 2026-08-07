@@ -307,13 +307,13 @@ async def test_view_state_preservation_across_group_move_and_dissolve(tmp_path) 
         await pilot.pause(0.05)
         assert tree2.cursor_node.data == python_ws_id
 
-        # Verify initial mode (starts as "all" after first load, toggling will switch to "filter")
+        # Verify initial mode (starts as "all" after first load)
         wvs_repo = WorkspaceViewSettingsRepository(session2)
         wvs_service = WorkspaceViewSettingsService(wvs_repo)
         wvs_service.get_settings(python_ws_id)
 
         # Let's run va 4 times and expect All <-> Filter toggling
-        # Since it starts as "filter" (set by vd and ve), the first toggle switches to "all"
+        # Since it starts as "filter", the first toggle switches to "all"
         expected_modes = ["all", "filter", "all", "filter"]
         for expected_mode in expected_modes:
             await pilot.press("v")
