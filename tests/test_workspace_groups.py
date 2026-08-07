@@ -355,3 +355,116 @@ async def test_view_state_preservation_across_group_move_and_dissolve(tmp_path) 
             assert fresh_settings.current_mode == current_expected_mode
 
     engine2.dispose()
+
+
+@pytest.mark.asyncio
+async def test_view_settings_transitions(session: Session) -> None:
+    """Verify state transitions and sequences (Step 7)."""
+    repo = NodeRepository(session)
+    service = NodeService(repo)
+
+    ws = service.create_node(
+        name="Transition WS", node_kind="workspace", auto_layout=True
+    )
+    group = service.create_node(name="Group", node_kind="workspace_group")
+
+    app = PathTreeApp(node_service=service)
+    async with app.run_test(size=(80, 60)) as pilot:
+        while app.screen.id != "main-screen":
+            await pilot.pause(0.01)
+
+        tree = app.screen.query_one("#tree-view", NodeTreeView)
+        # Select workspace
+        ws_tn = next(child for child in tree.root.children if child.data == ws.id)
+        tree.move_cursor(ws_tn)
+        await pilot.pause(0.05)
+
+        # 1. Test vv -> vf
+        # Starts in all view
+        await pilot.press("v", "v")  # Toggle hide-empty
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "all"
+        assert settings.hide_empty_sections is True
+
+        await pilot.press("v", "f")  # Files filter
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "filter"
+        assert settings.hide_empty_sections is True  # hide-empty is preserved!
+
+        # 2. Test vf -> vv
+        # Reset first
+        await pilot.press("v", "x")  # Reset to all
+        await pilot.pause(0.1)
+
+        await pilot.press("v", "f")  # Files filter (vf)
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "filter"
+        assert settings.hide_empty_sections is True
+
+        await pilot.press("v", "v")  # Toggle hide-empty (vv)
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "filter"
+        assert settings.hide_empty_sections is False
+
+        # 3. Test vv -> va -> va
+        # Reset first
+        await pilot.press("v", "x")  # Reset to all
+        await pilot.pause(0.1)
+
+        await pilot.press("v", "v")  # vv
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "all"
+        assert settings.hide_empty_sections is True
+
+        await pilot.press(
+            "v", "a"
+        )  # va -> switches to filter because hide_empty is a non-default filter!
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "filter"
+
+        await pilot.press("v", "a")  # va -> switches back to all
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "all"
+
+        # 4. Test dissolve -> vv -> vf
+        # Dissolve group
+        app.screen.node_service.dissolve_group(group.id)
+        app.screen.refresh_tree()
+        await pilot.pause(0.1)
+
+        await pilot.press("v", "v")  # vv
+        await pilot.pause(0.1)
+        await pilot.press("v", "f")  # vf
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "filter"
+
+        # 5. Test move group -> vv -> vf
+        # Create a new group and move WS inside
+        new_group = app.screen.node_service.create_node(
+            name="New Group", node_kind="workspace_group"
+        )
+        app.screen.node_service.move_node(ws.id, new_group.id)
+        app.screen.refresh_tree()
+        await pilot.pause(0.1)
+
+        # Select workspace inside group
+        ws_tn = next(
+            child for child in tree.root.children if child.data == new_group.id
+        ).children[0]
+        tree.move_cursor(ws_tn)
+        await pilot.pause(0.1)
+
+        await pilot.press("v", "v")  # vv
+        await pilot.pause(0.1)
+        await pilot.press("v", "f")  # vf
+        await pilot.pause(0.1)
+        settings = app.screen.view_settings_service.get_settings(ws.id)
+        assert settings.current_mode == "filter"

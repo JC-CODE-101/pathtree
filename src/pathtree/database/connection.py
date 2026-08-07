@@ -478,7 +478,6 @@ def init_db(engine: Engine) -> None:
                     "CREATE INDEX IF NOT EXISTS ix_resource_references_original_node_id ON resource_references (original_node_id);"
                 )
                 cursor.execute("PRAGMA user_version = 8;")
-                cursor.execute("PRAGMA user_version = 8;")
                 dbapi_conn.commit()
                 cursor.close()
             except Exception as e:

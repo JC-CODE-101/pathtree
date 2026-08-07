@@ -1538,6 +1538,7 @@ class MainScreen(Screen[None]):
                     settings.last_filter_mask > 0
                     or not settings.show_custom
                     or not settings.show_system
+                    or settings.hide_empty_sections
                 )
                 if has_stored:
                     settings.current_mode = "filter"
