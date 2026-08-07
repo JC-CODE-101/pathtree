@@ -92,22 +92,20 @@ class WorkspaceViewSettingsService:
 
         Does not modify the original node hierarchy structure or run database queries.
         """
-        filtered_roots = []
-        for root in tree_nodes:
-            if root.node.node_kind != "workspace":
-                filtered_roots.append(root)
-                continue
+        return [self._filter_node(node) for node in tree_nodes]
 
-            ws_id = root.node.id
+    def _filter_node(self, tn: TreeNode) -> TreeNode:
+        if tn.node.node_kind == "workspace":
+            ws_id = tn.node.id
             settings = self.get_settings(ws_id)
 
             if settings.current_mode == "all":
                 if not settings.hide_empty_sections:
-                    filtered_roots.append(root)
+                    return tn
                 else:
                     # Filter empty managed subsections
                     filtered_children = []
-                    for child in root.children:
+                    for child in tn.children:
                         is_sys_node = (
                             child.node.node_kind == "system_group"
                             and child.node.system_role == "system"
@@ -138,8 +136,7 @@ class WorkspaceViewSettingsService:
                             )
                         else:
                             filtered_children.append(child)
-                    filtered_roots.append(TreeNode(root.node, filtered_children))
-                continue
+                    return TreeNode(tn.node, filtered_children)
 
             # Filter View active
             # Custom visibility
@@ -152,7 +149,7 @@ class WorkspaceViewSettingsService:
             )
 
             filtered_children = []
-            for child in root.children:
+            for child in tn.children:
                 is_sys_node = (
                     child.node.node_kind == "system_group"
                     and child.node.system_role == "system"
@@ -218,6 +215,8 @@ class WorkspaceViewSettingsService:
                 else:
                     filtered_children.append(child)
 
-            filtered_roots.append(TreeNode(root.node, filtered_children))
-
-        return filtered_roots
+            return TreeNode(tn.node, filtered_children)
+        else:
+            # For other nodes (like workspace_group), recursively filter children
+            new_children = [self._filter_node(child) for child in tn.children]
+            return TreeNode(tn.node, new_children)

@@ -529,6 +529,15 @@ class NodeTreeView(Tree[uuid.UUID]):
         elif not self.show_root and self.root.children:
             self.call_after_refresh(self.move_cursor, self.root.children[0])
 
+    async def _on_key(self, event: events.Key) -> None:
+        """Intercept keys before they are processed by local bindings if view command mode is active."""
+        if getattr(self.screen, "_view_command_active", False):
+            event.stop()
+            event.prevent_default()
+            self.screen.on_key(event)
+            return
+        await super()._on_key(event)
+
     def populate_tree(self) -> None:
         """Populate branches from service-provided nodes recursively."""
         try:
